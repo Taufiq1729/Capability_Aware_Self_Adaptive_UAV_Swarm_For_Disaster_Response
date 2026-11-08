@@ -1,0 +1,60 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-cream: #FAF7F2;
+  --bg-card: #FFFFFF;
+  --border-subtle: #E8DFD0;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --terracotta: #C85A32;
+  --sage-green: #3D7A5A;
+  --amber-warning: #D97706;
+  --red-critical: #C53030;
+}
+
+body {
+  margin: 0;
+  background-color: #FAF7F2;
+  color: #292524;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom subtle scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #FAF7F2;
+}
+::-webkit-scrollbar-thumb {
+  background: #D9CBB7;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B44C27;
+}
+
+/* Custom animation pulses */
+@keyframes signal-pulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 0.3; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+.animate-signal {
+  animation: signal-pulse 2s infinite ease-in-out;
+}
+
+/* Radar ping */
+@keyframes radar-sweep {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.radar-spinner {
+  animation: radar-sweep 4s linear infinite;
+}

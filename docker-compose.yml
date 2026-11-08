@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:6.0
+    container_name: uav-swarm-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  simulation-service:
+    build: ./simulation-service
+    container_name: uav-swarm-simulation
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  backend:
+    build: ./backend
+    container_name: uav-swarm-backend
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+    environment:
+      - PORT=5001
+      - MONGODB_URI=mongodb://mongodb:27017/uav_swarm_db
+      - PYTHON_SERVICE_URL=http://simulation-service:8000/api
+    depends_on:
+      - mongodb
+      - simulation-service
+
+  frontend:
+    build: ./frontend
+    container_name: uav-swarm-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:
