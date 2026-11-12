@@ -21,6 +21,7 @@ export const FleetManagementPage = () => {
 
   const drones = simState?.drones || [];
   const detailedStates = simState?.detailed_drone_states || {};
+  const tasks = simState?.tasks || [];
 
   const modalDrone = activeModalDroneId ? detailedStates[activeModalDroneId] : null;
 
@@ -88,12 +89,61 @@ export const FleetManagementPage = () => {
                   </span>
                 </div>
 
-                {/* Role Pill */}
-                <div className="mt-3 bg-cream-50 rounded-xl p-2.5 border border-cream-200 flex items-center justify-between">
-                  <span className="text-[11px] text-charcoal-500 font-mono">Mission Role</span>
-                  <span className="text-xs font-semibold text-charcoal-900">
-                    {drone.current_role || drone.currentRole}
-                  </span>
+                {/* Role Pill & Assigned Tasks */}
+                <div className="mt-3 bg-cream-50 rounded-xl p-2.5 border border-cream-200 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] text-charcoal-500 font-mono">Mission Role</span>
+                    <span className="text-xs font-semibold text-charcoal-900">
+                      {drone.current_role || drone.currentRole}
+                    </span>
+                  </div>
+
+                  {/* Assigned Task(s) & Lineage */}
+                  <div className="pt-1.5 border-t border-cream-200">
+                    <span className="text-[10px] text-charcoal-400 font-mono block mb-1">
+                      Assigned Mission Task(s):
+                    </span>
+                    {tasks.filter((t) => t.assignedDrone === drone.drone_id).length === 0 ? (
+                      <span className="text-[11px] text-charcoal-400 italic font-mono block">
+                        No active task (Standby / RTL)
+                      </span>
+                    ) : (
+                      <div className="space-y-1">
+                        {tasks
+                          .filter((t) => t.assignedDrone === drone.drone_id)
+                          .map((t) => {
+                            const wasAcquired = !!(t.acquiredFrom || t.previousDrone);
+                            return (
+                              <div
+                                key={t.taskId}
+                                className={`px-2 py-1 rounded text-[11px] font-mono flex items-center justify-between ${
+                                  wasAcquired
+                                    ? 'bg-terracotta-100/70 text-terracotta-800 border border-terracotta-300'
+                                    : t.taskId.includes('RELAY')
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-white text-charcoal-800 border border-cream-200'
+                                }`}
+                              >
+                                <span className="font-bold">{t.taskId}</span>
+                                {wasAcquired ? (
+                                  <span className="text-[10px] font-bold text-terracotta-700 bg-white px-1.5 py-0.2 rounded border border-terracotta-300">
+                                    Acquired from {t.acquiredFrom || t.previousDrone}
+                                  </span>
+                                ) : t.taskId.includes('RELAY') ? (
+                                  <span className="text-[10px] text-amber-800 font-semibold">
+                                    Autonomously Assigned
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-charcoal-500 font-normal">
+                                    {t.taskType}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Subsystem Quick Gauges */}

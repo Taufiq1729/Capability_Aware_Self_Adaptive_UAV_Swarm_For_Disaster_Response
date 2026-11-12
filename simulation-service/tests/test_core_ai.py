@@ -147,5 +147,99 @@ class TestCoreAIArchitecture(unittest.TestCase):
         resolved = auction.resolve_auction("TSK-TEST", sim_time=12.0)
         self.assertEqual(resolved["winner_drone_id"], "UAV-Beta")
 
+    def test_stage_5_low_diagnostic_confidence_safety_fallback(self):
+        """Diagnostic confidence < 60% must trigger safety fallback to avoid misinformed missions"""
+        cap = {
+            "c_RGB": 1.0, "c_Thermal": 1.0, "c_LiDAR": 1.0, "c_Communication": 1.0,
+            "c_Mobility": 1.0, "c_Localization": 1.0, "c_Energy": 0.85, "c_Compute": 1.0
+        }
+        new_role, feasible, reason = self.role_selector.select_best_role(
+            "Search and exploration", cap, battery_pct=85.0, diagnostic_confidence=0.45
+        )
+        self.assertEqual(new_role, "Return to Home / Land")
+        self.assertIn("Insufficient diagnostic confidence", reason)
+
+    def test_stage_7_health_and_confidence_aware_bidding(self):
+        """Bids must incorporate health status, diagnostic confidence, and sensor payload"""
+        auction = DistributedAuctionCoordinator()
+        task = {
+            "taskId": "TSK-OPTICAL",
+            "taskType": "SEARCH",
+            "location": {"x": 200.0, "y": 200.0}
+        }
+        auction.start_auction(
+            task,
+            initiating_drone_id="UAV-Alpha",
+            reason="RGB Camera hardware failure",
+            sim_time=10.0,
+            initiator_health_status="DEGRADED",
+            initiator_fault="OPTICAL_HARDWARE_FAILURE",
+            initiator_confidence=0.94
+        )
+        
+        # Peer B: Healthy, 98% confidence
+        bid_b = auction.submit_bid(
+            task_id="TSK-OPTICAL",
+            drone_id="UAV-Beta",
+            drone_cap={"c_RGB": 0.95, "c_Thermal": 0.90, "c_Mobility": 0.90, "c_Communication": 0.90},
+            drone_pos=(210.0, 210.0),
+            task_loc=(200.0, 200.0),
+            battery_pct=90.0,
+            health_status="HEALTHY",
+            diagnostic_confidence=0.98
+        )
+        
+        # Peer C: Degraded, 65% confidence, lower capabilities
+        bid_c = auction.submit_bid(
+            task_id="TSK-OPTICAL",
+            drone_id="UAV-Gamma",
+            drone_cap={"c_RGB": 0.55, "c_Thermal": 0.50, "c_Mobility": 0.60, "c_Communication": 0.80},
+            drone_pos=(210.0, 210.0),
+            task_loc=(200.0, 200.0),
+            battery_pct=90.0,
+            health_status="DEGRADED",
+            diagnostic_confidence=0.65
+        )
+        
+        self.assertIsNotNone(bid_b)
+        self.assertIsNotNone(bid_c)
+        self.assertGreater(bid_b, bid_c)
+        
+        resolved = auction.resolve_auction("TSK-OPTICAL", sim_time=12.0)
+        self.assertEqual(resolved["winner_drone_id"], "UAV-Beta")
+        self.assertEqual(resolved["initiator_fault"], "OPTICAL_HARDWARE_FAILURE")
+
+    def test_autonomous_camera_failure_reallocation_scenario(self):
+        """Simulates camera failure on UAV-Alpha:
+        - Task is acquired by healthy peer (UAV-Beta)
+        - UAV-Alpha autonomously transitions to Relay role
+        - UAV-Alpha is autonomously assigned an alternative Relay task
+        """
+        from app.agents.swarm_manager import SwarmManager
+        sm = SwarmManager(num_drones=6, seed=42)
+        sm.step(dt=1.0)
+        
+        # Inject camera failure on UAV-Alpha
+        sm.inject_fault("UAV-Alpha", "rgb_camera", "hardware_failure", severity=1.0)
+        
+        # Run simulation steps
+        for _ in range(3):
+            sm.step(dt=1.0)
+            
+        alpha = sm.drones["UAV-Alpha"]
+        # UAV-Alpha role must have adapted autonomously away from failed RGB visual search
+        self.assertNotEqual(alpha.current_role, "Search and exploration")
+        self.assertIn(alpha.current_role, ["Communication relay", "Victim detection", "Mapping and reconnaissance"])
+        
+        # Check original task TSK-101 has been acquired by a healthy peer
+        tsk_101 = next(t for t in sm.tasks if t["taskId"] == "TSK-101")
+        self.assertEqual(tsk_101["acquiredFrom"], "UAV-Alpha")
+        self.assertIsNotNone(tsk_101["assignedDrone"])
+        self.assertNotEqual(tsk_101["assignedDrone"], "UAV-Alpha")
+        
+        # UAV-Alpha must have surrendered TSK-101 and been assigned an alternative task
+        self.assertNotIn("TSK-101", alpha.assigned_tasks)
+        self.assertTrue(len(alpha.assigned_tasks) > 0)
+
 if __name__ == "__main__":
     unittest.main()

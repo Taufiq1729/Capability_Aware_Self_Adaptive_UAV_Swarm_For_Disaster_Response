@@ -21,12 +21,32 @@ const taskSchema = new mongoose.Schema({
     min_Battery: { type: Number, default: 15 }
   },
   assignedDrone: { type: String, default: null },
+  previousDrone: { type: String, default: null },
+  acquiredFrom: { type: String, default: null },
+  handoverReason: { type: String, default: null },
+  handoverConfidence: { type: Number, default: null },
+  handoverTimestamp: { type: Number, default: null },
+  assignedBasedOnHealth: {
+    healthStatus: { type: String, default: 'HEALTHY' },
+    confidence: { type: Number, default: 0.98 },
+    winningBidScore: { type: Number, default: null },
+    reason: { type: String, default: '' }
+  },
   taskStatus: {
     type: String,
     enum: ['PENDING', 'BIDDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'FAILED'],
     default: 'PENDING'
   },
   priority: { type: Number, default: 5 },
+  handoverHistory: [{
+    fromDrone: String,
+    toDrone: String,
+    reason: String,
+    initiatorHealth: String,
+    winnerHealth: String,
+    bidScore: Number,
+    timestamp: Number
+  }],
   biddingHistory: [{
     droneId: String,
     bidScore: Number,

@@ -46,36 +46,70 @@ class SwarmManager:
         count = min(len(initial_configs), self.num_drones)
         for i in range(count):
             did, x, y, role = initial_configs[i]
-            self.drones[did] = UAVAgent(did, x, y, role)
+            drone = UAVAgent(did, x, y, role)
+            self.drones[did] = drone
 
     def initialize_tasks(self):
         self.tasks = [
             {
                 "taskId": "TSK-101",
-                "title": "Sector A Rubble Search",
+                "title": "Sector A Rubble Search (RGB Optical)",
                 "taskType": "SEARCH",
                 "location": {"x": 160.0, "y": 180.0},
                 "assignedDrone": "UAV-Alpha",
+                "previousDrone": None,
+                "acquiredFrom": None,
+                "handoverReason": None,
+                "handoverConfidence": None,
+                "handoverTimestamp": None,
                 "taskStatus": "IN_PROGRESS",
-                "priority": 8
+                "priority": 8,
+                "assignedBasedOnHealth": {
+                    "healthStatus": "HEALTHY",
+                    "confidence": 0.98,
+                    "reason": "Nominal sensor baseline and high RGB camera sharpness"
+                },
+                "handoverHistory": []
             },
             {
                 "taskId": "TSK-102",
-                "title": "Trapped Survivor Detection",
+                "title": "Trapped Survivor Detection (Thermal FLIR)",
                 "taskType": "VICTIM_DETECTION",
                 "location": {"x": 260.0, "y": 390.0},
                 "assignedDrone": "UAV-Beta",
+                "previousDrone": None,
+                "acquiredFrom": None,
+                "handoverReason": None,
+                "handoverConfidence": None,
+                "handoverTimestamp": None,
                 "taskStatus": "IN_PROGRESS",
-                "priority": 10
+                "priority": 10,
+                "assignedBasedOnHealth": {
+                    "healthStatus": "HEALTHY",
+                    "confidence": 0.98,
+                    "reason": "Uncooled microbolometer NETD < 50mK and high radiometric sensitivity"
+                },
+                "handoverHistory": []
             },
             {
                 "taskId": "TSK-103",
-                "title": "Collapsed Commercial Infrastructure Mapping",
+                "title": "Collapsed Infrastructure 3D Mapping",
                 "taskType": "MAPPING",
                 "location": {"x": 450.0, "y": 140.0},
                 "assignedDrone": "UAV-Gamma",
+                "previousDrone": None,
+                "acquiredFrom": None,
+                "handoverReason": None,
+                "handoverConfidence": None,
+                "handoverTimestamp": None,
                 "taskStatus": "IN_PROGRESS",
-                "priority": 7
+                "priority": 7,
+                "assignedBasedOnHealth": {
+                    "healthStatus": "HEALTHY",
+                    "confidence": 0.98,
+                    "reason": "LiDAR point cloud return > 90k pts/s and sub-meter GNSS HDOP"
+                },
+                "handoverHistory": []
             },
             {
                 "taskId": "TSK-104",
@@ -83,8 +117,19 @@ class SwarmManager:
                 "taskType": "COMMUNICATION_RELAY",
                 "location": {"x": 400.0, "y": 300.0},
                 "assignedDrone": "UAV-Delta",
+                "previousDrone": None,
+                "acquiredFrom": None,
+                "handoverReason": None,
+                "handoverConfidence": None,
+                "handoverTimestamp": None,
                 "taskStatus": "IN_PROGRESS",
-                "priority": 9
+                "priority": 9,
+                "assignedBasedOnHealth": {
+                    "healthStatus": "HEALTHY",
+                    "confidence": 0.98,
+                    "reason": "Strong RF RSSI -45dBm, 0% packet loss and high bandwidth"
+                },
+                "handoverHistory": []
             },
             {
                 "taskId": "TSK-105",
@@ -92,10 +137,27 @@ class SwarmManager:
                 "taskType": "SEARCH",
                 "location": {"x": 580.0, "y": 420.0},
                 "assignedDrone": "UAV-Epsilon",
+                "previousDrone": None,
+                "acquiredFrom": None,
+                "handoverReason": None,
+                "handoverConfidence": None,
+                "handoverTimestamp": None,
                 "taskStatus": "IN_PROGRESS",
-                "priority": 6
+                "priority": 6,
+                "assignedBasedOnHealth": {
+                    "healthStatus": "HEALTHY",
+                    "confidence": 0.98,
+                    "reason": "Dual sensor visual payload and high mobility"
+                },
+                "handoverHistory": []
             }
         ]
+        
+        # Link assigned tasks to drone instances
+        for t in self.tasks:
+            drone_id = t["assignedDrone"]
+            if drone_id in self.drones:
+                self.drones[drone_id].assigned_tasks = [t["taskId"]]
 
     def reset(self, num_drones: Optional[int] = None, seed: Optional[int] = None):
         if seed is not None:
@@ -184,23 +246,28 @@ class SwarmManager:
                 }
                 self.recent_events.append(event)
 
-                # Check if this drone held tasks requiring its former role
+                # Check if this drone held tasks requiring capabilities it no longer possesses
                 for task in self.tasks:
                     if task.get("assignedDrone") == did and task.get("taskStatus") == "IN_PROGRESS":
                         # Initiate decentralized bidding for task
                         auction = self.auction_coordinator.start_auction(
                             task=task,
                             initiating_drone_id=did,
-                            reason=f"Primary sensor degraded; adapted from {prev_role} to {new_role}",
-                            sim_time=self.sim_time
+                            reason=f"Primary sensor degraded ({state['diagnosis']['primary_fault']['category']}). Role autonomously adapted from '{prev_role}' to '{new_role}'.",
+                            sim_time=self.sim_time,
+                            initiator_health_status=state["operational_status"],
+                            initiator_fault=state["diagnosis"]["primary_fault"]["category"],
+                            initiator_confidence=state["diagnosis"]["diagnostic_confidence"]
                         )
                         task["taskStatus"] = "BIDDING"
+                        task["previousDrone"] = did
                         task["assignedDrone"] = None
                         self.recent_events.append({
                             "eventType": "TASK_REASSIGNMENT_REQUESTED",
                             "taskId": task["taskId"],
                             "initiatingDrone": did,
-                            "timestamp": self.sim_time
+                            "reason": auction["reason"],
+                            "timestamp": round(self.sim_time, 1)
                         })
 
         # 3. Update P2P Communication Mesh Topology (Stage 6)
@@ -216,14 +283,17 @@ class SwarmManager:
                 
                 for peer_id in reachable_peers:
                     peer_drone = self.drones[peer_id]
-                    # Drone evaluates its own capability and bids
+                    # Drone evaluates its own capability, health status, and confidence to submit bid
                     bid_val = self.auction_coordinator.submit_bid(
                         task_id=task_id,
                         drone_id=peer_id,
                         drone_cap=peer_drone.latest_capabilities,
                         drone_pos=(peer_drone.x, peer_drone.y),
                         task_loc=(auction["task"]["location"]["x"], auction["task"]["location"]["y"]),
-                        battery_pct=peer_drone.telemetry_gen.battery_level
+                        battery_pct=peer_drone.telemetry_gen.battery_level,
+                        health_status=peer_drone.operational_status,
+                        diagnostic_confidence=peer_drone.latest_diagnosis.get("diagnostic_confidence", 0.98),
+                        active_faults=list(peer_drone.telemetry_gen.injected_faults.keys())
                     )
                     if bid_val is not None:
                         self.recent_events.append({
@@ -231,27 +301,163 @@ class SwarmManager:
                             "taskId": task_id,
                             "droneId": peer_id,
                             "bidScore": bid_val,
-                            "timestamp": self.sim_time
+                            "healthStatus": peer_drone.operational_status,
+                            "diagnosticConfidence": peer_drone.latest_diagnosis.get("diagnostic_confidence", 0.98),
+                            "timestamp": round(self.sim_time, 1)
                         })
 
                 # Resolve auction
                 resolved_auction = self.auction_coordinator.resolve_auction(task_id, self.sim_time)
                 if resolved_auction and resolved_auction["status"] == "RESOLVED":
                     winner_id = resolved_auction["winner_drone_id"]
-                    # Update task assignment
+                    winner_drone = self.drones[winner_id]
+                    initiator_id = resolved_auction["initiating_drone_id"]
+                    initiator_drone = self.drones.get(initiator_id)
+                    winner_bid = resolved_auction["bids"][winner_id]
+
+                    # 1. Update task assignment & lineage (The camera task is acquired by winner drone)
                     for t in self.tasks:
                         if t["taskId"] == task_id:
                             t["assignedDrone"] = winner_id
+                            t["previousDrone"] = initiator_id
+                            t["acquiredFrom"] = initiator_id
+                            t["handoverReason"] = f"Acquired from {initiator_id} due to {resolved_auction.get('initiator_fault')} (Diag Conf: {round(resolved_auction.get('initiator_confidence', 0.95)*100)}%)"
+                            t["handoverTimestamp"] = round(self.sim_time, 1)
                             t["taskStatus"] = "IN_PROGRESS"
-                            self.drones[winner_id].assigned_tasks.append(task_id)
+                            t["assignedBasedOnHealth"] = {
+                                "healthStatus": winner_drone.operational_status,
+                                "confidence": winner_bid.get("diagnostic_confidence", 0.98),
+                                "winningBidScore": winner_bid["score"],
+                                "reason": f"Highest healthy bid ({winner_bid['score']}) based on intact sensor payload"
+                            }
+                            if "handoverHistory" not in t:
+                                t["handoverHistory"] = []
+                            t["handoverHistory"].append({
+                                "fromDrone": initiator_id,
+                                "toDrone": winner_id,
+                                "reason": t["handoverReason"],
+                                "initiatorHealth": resolved_auction.get("initiator_health_status", "DEGRADED"),
+                                "winnerHealth": winner_drone.operational_status,
+                                "bidScore": winner_bid["score"],
+                                "timestamp": round(self.sim_time, 1)
+                            })
+                            
+                            if task_id not in winner_drone.assigned_tasks:
+                                winner_drone.assigned_tasks.append(task_id)
                             # Vector winner toward task site
-                            self.drones[winner_id].set_target(t["location"]["x"], t["location"]["y"])
+                            winner_drone.set_target(t["location"]["x"], t["location"]["y"])
                             break
+
+                    # 2. Autonomously assign alternative work to the drone whose primary sensor failed
+                    if initiator_drone:
+                        # Clear old task from initiator's active list
+                        if task_id in initiator_drone.assigned_tasks:
+                            initiator_drone.assigned_tasks.remove(task_id)
+
+                        init_role = initiator_drone.current_role
+                        if init_role == "Communication relay":
+                            relay_task_id = f"TSK-RELAY-{initiator_id.split('-')[-1]}"
+                            existing_relay = next((t for t in self.tasks if t["taskId"] == relay_task_id), None)
+                            if not existing_relay:
+                                new_relay_task = {
+                                    "taskId": relay_task_id,
+                                    "title": f"Dynamic Mesh Relay Link (Assisting {winner_id})",
+                                    "taskType": "COMMUNICATION_RELAY",
+                                    "location": {
+                                        "x": round((initiator_drone.x + winner_drone.x) / 2.0, 1),
+                                        "y": round((initiator_drone.y + winner_drone.y) / 2.0, 1)
+                                    },
+                                    "assignedDrone": initiator_id,
+                                    "previousDrone": None,
+                                    "acquiredFrom": None,
+                                    "handoverReason": None,
+                                    "taskStatus": "IN_PROGRESS",
+                                    "priority": 8,
+                                    "assignedBasedOnHealth": {
+                                        "healthStatus": initiator_drone.operational_status,
+                                        "confidence": initiator_drone.latest_diagnosis.get("diagnostic_confidence", 0.95),
+                                        "reason": f"Autonomously assigned Relay task to {initiator_id} based on healthy RF transceivers after sensor failure"
+                                    },
+                                    "handoverHistory": []
+                                }
+                                self.tasks.append(new_relay_task)
+                            initiator_drone.assigned_tasks = [relay_task_id]
+                            initiator_drone.set_target(
+                                round((initiator_drone.x + winner_drone.x) / 2.0, 1),
+                                round((initiator_drone.y + winner_drone.y) / 2.0, 1)
+                            )
+                        elif init_role == "Victim detection":
+                            vic_task_id = f"TSK-VICTIM-{initiator_id.split('-')[-1]}"
+                            existing_vic = next((t for t in self.tasks if t["taskId"] == vic_task_id), None)
+                            if not existing_vic:
+                                new_vic_task = {
+                                    "taskId": vic_task_id,
+                                    "title": f"Thermal Survivor Search (Autonomous Sweep)",
+                                    "taskType": "VICTIM_DETECTION",
+                                    "location": {
+                                        "x": round(initiator_drone.x + random.uniform(-70, 70), 1),
+                                        "y": round(initiator_drone.y + random.uniform(-70, 70), 1)
+                                    },
+                                    "assignedDrone": initiator_id,
+                                    "previousDrone": None,
+                                    "acquiredFrom": None,
+                                    "handoverReason": None,
+                                    "taskStatus": "IN_PROGRESS",
+                                    "priority": 9,
+                                    "assignedBasedOnHealth": {
+                                        "healthStatus": initiator_drone.operational_status,
+                                        "confidence": initiator_drone.latest_diagnosis.get("diagnostic_confidence", 0.95),
+                                        "reason": f"Autonomously assigned Thermal Victim Detection based on intact FLIR camera after RGB camera failure"
+                                    },
+                                    "handoverHistory": []
+                                }
+                                self.tasks.append(new_vic_task)
+                            initiator_drone.assigned_tasks = [vic_task_id]
+                            initiator_drone.set_target(
+                                max(50.0, min(self.env.width - 50.0, initiator_drone.x + random.uniform(-80, 80))),
+                                max(50.0, min(self.env.height - 50.0, initiator_drone.y + random.uniform(-80, 80)))
+                            )
+                        elif init_role == "Mapping and reconnaissance":
+                            map_task_id = f"TSK-MAP-{initiator_id.split('-')[-1]}"
+                            existing_map = next((t for t in self.tasks if t["taskId"] == map_task_id), None)
+                            if not existing_map:
+                                new_map_task = {
+                                    "taskId": map_task_id,
+                                    "title": f"Secondary 3D Hazard Mapping (Autonomous)",
+                                    "taskType": "MAPPING",
+                                    "location": {
+                                        "x": round(initiator_drone.x + random.uniform(-60, 60), 1),
+                                        "y": round(initiator_drone.y + random.uniform(-60, 60), 1)
+                                    },
+                                    "assignedDrone": initiator_id,
+                                    "previousDrone": None,
+                                    "acquiredFrom": None,
+                                    "handoverReason": None,
+                                    "taskStatus": "IN_PROGRESS",
+                                    "priority": 7,
+                                    "assignedBasedOnHealth": {
+                                        "healthStatus": initiator_drone.operational_status,
+                                        "confidence": initiator_drone.latest_diagnosis.get("diagnostic_confidence", 0.95),
+                                        "reason": f"Autonomously assigned LiDAR Mapping task following optical camera degradation"
+                                    },
+                                    "handoverHistory": []
+                                }
+                                self.tasks.append(new_map_task)
+                            initiator_drone.assigned_tasks = [map_task_id]
+                            initiator_drone.set_target(new_map_task["location"]["x"], new_map_task["location"]["y"])
+                        elif init_role == "Return to Home / Land":
+                            initiator_drone.assigned_tasks = []
+                            initiator_drone.set_target(50.0, 50.0)
+
                     self.recent_events.append({
                         "eventType": "TASK_REASSIGNED",
                         "taskId": task_id,
                         "awardedTo": winner_id,
-                        "timestamp": self.sim_time
+                        "previousDrone": initiator_id,
+                        "winningScore": winner_bid["score"],
+                        "initiatorAssignedTask": initiator_drone.assigned_tasks[0] if (initiator_drone and initiator_drone.assigned_tasks) else "RTL",
+                        "reason": f"Task {task_id} acquired by {winner_id} from {initiator_id}. {initiator_id} autonomously assigned {initiator_drone.current_role if initiator_drone else 'alternative'} work based on health status & diagnostic confidence.",
+                        "timestamp": round(self.sim_time, 1)
                     })
 
         # 5. Check Victim Detection across the Disaster Environment

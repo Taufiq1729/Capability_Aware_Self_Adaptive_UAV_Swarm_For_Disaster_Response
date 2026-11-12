@@ -36,14 +36,14 @@ class SafetyConstrainedRoleSelector:
             }
 
         # 1. Search and exploration
-        # Needs decent mobility, localization, compute, and visual sensing (RGB or Thermal)
-        search_sensor_ok = (cap["c_RGB"] >= 0.45) or (cap["c_Thermal"] >= 0.55)
+        # Mandatory: High-framerate RGB optical camera pipeline
+        search_sensor_ok = (cap.get("c_RGB", 0.0) >= 0.45)
         feasibility["Search and exploration"] = bool(
             search_sensor_ok and
-            cap["c_Mobility"] >= 0.45 and
-            cap["c_Localization"] >= 0.40 and
-            cap["c_Energy"] >= 0.22 and
-            cap["c_Compute"] >= 0.30
+            cap.get("c_Mobility", 0.0) >= 0.45 and
+            cap.get("c_Localization", 0.0) >= 0.40 and
+            cap.get("c_Energy", 0.0) >= 0.22 and
+            cap.get("c_Compute", 0.0) >= 0.30
         )
 
         # 2. Victim detection
@@ -81,11 +81,30 @@ class SafetyConstrainedRoleSelector:
 
         return feasibility
 
-    def select_best_role(self, current_role: str, cap: Dict[str, float], battery_pct: float, mission_needs: Optional[Dict[str, int]] = None) -> Tuple[str, List[str], str]:
+    def select_best_role(
+        self,
+        current_role: str,
+        cap: Dict[str, float],
+        battery_pct: float,
+        mission_needs: Optional[Dict[str, int]] = None,
+        diagnostic_confidence: float = 0.95
+    ) -> Tuple[str, List[str], str]:
         """
+        Stage 5: Autonomous Safety-Constrained Role Selection.
         Selects feasible role with highest operational utility or switches to safe fallback.
+        - If diagnostic confidence is insufficient (<0.60), triggers conservative safety fallback.
+        - If current role violates hard sensor/actuator constraints, dynamically selects the best
+          viable operational role using remaining capabilities.
         Returns: (new_role, feasible_roles_list, reason_for_transition)
         """
+        # Safety fallback branch: Insufficient diagnostic confidence
+        if diagnostic_confidence < 0.60:
+            return (
+                "Return to Home / Land",
+                ["Return to Home / Land"],
+                f"Safety fallback: Insufficient diagnostic confidence ({round(diagnostic_confidence * 100)}% < 60%). Halting autonomous operations."
+            )
+
         feasibility = self.evaluate_role_feasibility(cap, battery_pct)
         feasible_roles = [r for r, ok in feasibility.items() if ok and r != "Return to Home / Land"]
 
@@ -95,23 +114,29 @@ class SafetyConstrainedRoleSelector:
 
         # If no active mission roles are feasible, trigger RTL
         if not feasible_roles:
-            return "Return to Home / Land", ["Return to Home / Land"], "Critical hardware or energy degradation: Local safety abort triggered"
+            return (
+                "Return to Home / Land",
+                ["Return to Home / Land"],
+                "Critical hardware or energy degradation: Local safety abort triggered"
+            )
 
-        # Utility calculation for feasible candidate roles
+        # Autonomous utility calculation for feasible candidate roles
+        # Weighted operational utility matching surviving onboard sensors
         role_utilities = {}
         for r in feasible_roles:
             if r == "Search and exploration":
-                u = 0.35 * cap["c_RGB"] + 0.30 * cap["c_Mobility"] + 0.20 * cap["c_Localization"] + 0.15 * cap["c_Energy"]
+                u = 0.40 * cap.get("c_RGB", 0.0) + 0.25 * cap.get("c_Mobility", 0.0) + 0.20 * cap.get("c_Localization", 0.0) + 0.15 * cap.get("c_Energy", 0.0)
             elif r == "Victim detection":
-                u = 0.50 * cap["c_Thermal"] + 0.25 * cap["c_Localization"] + 0.25 * cap["c_Energy"]
+                u = 0.50 * cap.get("c_Thermal", 0.0) + 0.25 * cap.get("c_Localization", 0.0) + 0.25 * cap.get("c_Energy", 0.0)
             elif r == "Mapping and reconnaissance":
-                u = 0.45 * cap["c_LiDAR"] + 0.35 * cap["c_Localization"] + 0.20 * cap["c_Mobility"]
+                # High-fidelity 3D reconstruction fuses LiDAR with optical RGB texturing
+                u = 0.40 * cap.get("c_LiDAR", 0.0) + 0.20 * cap.get("c_RGB", 0.0) + 0.25 * cap.get("c_Localization", 0.0) + 0.15 * cap.get("c_Mobility", 0.0)
             elif r == "Communication relay":
-                u = 0.60 * cap["c_Communication"] + 0.25 * cap["c_Energy"] + 0.15 * cap["c_Mobility"]
+                u = 0.60 * cap.get("c_Communication", 0.0) + 0.25 * cap.get("c_Energy", 0.0) + 0.15 * cap.get("c_Mobility", 0.0)
             else:
-                u = 0.1
-            role_utilities[r] = u
+                u = 0.10
+            role_utilities[r] = round(u, 4)
 
         best_role = max(role_utilities.items(), key=lambda x: x[1])[0]
-        reason = f"Adapted from '{current_role}' to '{best_role}' due to capability constraints"
+        reason = f"Autonomously adapted from '{current_role}' to '{best_role}' based on remaining capability utility (Diagnostic Confidence: {round(diagnostic_confidence * 100)}%)"
         return best_role, feasible_roles, reason

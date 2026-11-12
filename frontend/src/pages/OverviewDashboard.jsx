@@ -346,6 +346,132 @@ export const OverviewDashboard = () => {
           </Link>
         </div>
       </div>
+
+      {/* Autonomous Task Reallocation & Health Status Matrix */}
+      <div className="bg-white border border-cream-300 rounded-2xl p-5 shadow-2xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-cream-200 gap-2">
+          <div>
+            <h3 className="text-sm font-bold font-mono text-charcoal-900 uppercase tracking-wider flex items-center">
+              <Target className="w-4 h-4 mr-2 text-terracotta-500" />
+              Autonomous Task Allocation & Health Status Matrix
+            </h3>
+            <span className="text-xs text-charcoal-500">
+              Live mapping of which task is assigned to which drone based on health status and confidence
+            </span>
+          </div>
+          <Link
+            to="/coordination"
+            className="text-xs font-mono font-bold text-terracotta-600 hover:text-terracotta-700 flex items-center"
+          >
+            Inspect P2P Auctions &rarr;
+          </Link>
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs font-mono">
+            <thead>
+              <tr className="border-b border-cream-200 text-charcoal-400 text-[11px]">
+                <th className="pb-2.5 font-medium">Task ID & Name</th>
+                <th className="pb-2.5 font-medium">Type</th>
+                <th className="pb-2.5 font-medium">Assigned Drone</th>
+                <th className="pb-2.5 font-medium">Health Status</th>
+                <th className="pb-2.5 font-medium">Diag Conf</th>
+                <th className="pb-2.5 font-medium">Task Acquisition & Lineage</th>
+                <th className="pb-2.5 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-cream-100">
+              {tasks.map((t) => {
+                const droneObj = drones.find((d) => d.drone_id === t.assignedDrone);
+                const healthStatus =
+                  droneObj?.operational_status ||
+                  droneObj?.operationalStatus ||
+                  t.assignedBasedOnHealth?.healthStatus ||
+                  'HEALTHY';
+                const conf =
+                  droneObj?.diagnostic_confidence ??
+                  t.assignedBasedOnHealth?.confidence ??
+                  0.98;
+                const wasAcquired = !!(t.acquiredFrom || t.previousDrone);
+
+                return (
+                  <tr key={t.taskId} className="hover:bg-cream-50/60 transition">
+                    <td className="py-3 pr-3">
+                      <div className="font-bold text-charcoal-900">{t.taskId}</div>
+                      <div className="text-[11px] text-charcoal-500 font-sans">{t.title}</div>
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span className="px-2 py-0.5 rounded bg-cream-100 text-charcoal-700 font-semibold text-[10px]">
+                        {t.taskType}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3">
+                      {t.assignedDrone ? (
+                        <span className="font-bold text-charcoal-900 bg-cream-100 px-2 py-0.5 rounded border border-cream-300">
+                          {t.assignedDrone}
+                        </span>
+                      ) : (
+                        <span className="text-amber-600 italic">Bidding / Open</span>
+                      )}
+                    </td>
+                    <td className="py-3 pr-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          healthStatus === 'HEALTHY'
+                            ? 'bg-sage-100 text-sage-800'
+                            : healthStatus === 'DEGRADED'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-critical-100 text-critical-800'
+                        }`}
+                      >
+                        {healthStatus}
+                      </span>
+                    </td>
+                    <td className="py-3 pr-3 text-charcoal-700 font-semibold">
+                      {Math.round(conf * 100)}%
+                    </td>
+                    <td className="py-3 pr-3 font-sans">
+                      {wasAcquired ? (
+                        <div className="bg-terracotta-50 border border-terracotta-200 px-2.5 py-1.5 rounded-lg text-xs space-y-0.5">
+                          <div className="font-mono text-terracotta-800 font-bold flex items-center space-x-1">
+                            <span>Acquired from {t.acquiredFrom || t.previousDrone}</span>
+                            <ArrowRight className="w-3 h-3 text-terracotta-500 inline" />
+                            <span>{t.assignedDrone}</span>
+                          </div>
+                          <div className="text-[11px] text-charcoal-600 line-clamp-1">
+                            {t.handoverReason || 'Sensor failure on previous drone'}
+                          </div>
+                        </div>
+                      ) : t.taskId.includes('RELAY') ? (
+                        <span className="text-amber-700 bg-amber-50 px-2 py-1 rounded text-[11px] font-mono border border-amber-200">
+                          Autonomously assigned alternative Relay role
+                        </span>
+                      ) : (
+                        <span className="text-charcoal-500 text-[11px]">
+                          Initial assignment (Intact capability)
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          t.taskStatus === 'IN_PROGRESS'
+                            ? 'bg-sage-100 text-sage-700'
+                            : t.taskStatus === 'BIDDING'
+                            ? 'bg-amber-100 text-amber-700 animate-pulse'
+                            : 'bg-cream-200 text-charcoal-600'
+                        }`}
+                      >
+                        {t.taskStatus}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };

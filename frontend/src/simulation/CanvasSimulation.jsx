@@ -108,23 +108,79 @@ export const CanvasSimulation = ({
       });
     }
 
-    // 5. Active Mission Task Markers
+    // 5. Active Mission Task Markers & Handover Visualizer
     const tasks = simState?.tasks || [];
+    const drones = simState?.drones || [];
+    const dronePosMap = {};
+    drones.forEach((d) => {
+      dronePosMap[d.drone_id] = { x: d.x, y: d.y };
+    });
+
     tasks.forEach((tsk) => {
       const loc = tsk.location;
       if (!loc) return;
-      ctx.fillStyle = tsk.taskStatus === 'IN_PROGRESS' ? '#C85A32' : '#D97706';
+      const wasAcquired = !!(tsk.acquiredFrom || tsk.previousDrone);
+
+      // Draw task icon & ring
+      ctx.fillStyle = wasAcquired
+        ? '#C85A32'
+        : tsk.taskStatus === 'IN_PROGRESS'
+        ? '#3D7A5A'
+        : '#D97706';
       ctx.beginPath();
-      ctx.arc(loc.x, loc.y, 6, 0, Math.PI * 2);
+      ctx.arc(loc.x, loc.y, wasAcquired ? 7 : 5.5, 0, Math.PI * 2);
       ctx.fill();
 
       ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       ctx.stroke();
 
-      ctx.font = '9px JetBrains Mono, monospace';
-      ctx.fillStyle = '#292524';
-      ctx.fillText(`${tsk.taskId} (${tsk.taskType[0]})`, loc.x + 9, loc.y + 3);
+      // Pulsing outer ring if acquired
+      if (wasAcquired) {
+        ctx.strokeStyle = 'rgba(200, 90, 50, 0.45)';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(loc.x, loc.y, 14, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      ctx.font = 'bold 9px JetBrains Mono, monospace';
+      ctx.fillStyle = '#1C1917';
+      const label = wasAcquired
+        ? `${tsk.taskId} [${tsk.acquiredFrom} ➔ ${tsk.assignedDrone}]`
+        : `${tsk.taskId} (${tsk.assignedDrone || 'Unassigned'})`;
+      ctx.fillText(label, loc.x + 10, loc.y + 3);
+
+      // If task was acquired, draw dashed handover trajectory from source drone to assignee
+      if (wasAcquired && tsk.acquiredFrom && tsk.assignedDrone) {
+        const srcPos = dronePosMap[tsk.acquiredFrom];
+        const dstPos = dronePosMap[tsk.assignedDrone];
+        if (srcPos && dstPos) {
+          ctx.save();
+          ctx.setLineDash([3, 4]);
+          ctx.strokeStyle = 'rgba(200, 90, 50, 0.75)';
+          ctx.lineWidth = 1.8;
+          ctx.beginPath();
+          ctx.moveTo(srcPos.x, srcPos.y);
+          ctx.lineTo(dstPos.x, dstPos.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // Draw dashed line from assigned drone to its task destination
+      if (tsk.assignedDrone && dronePosMap[tsk.assignedDrone]) {
+        const dPos = dronePosMap[tsk.assignedDrone];
+        ctx.save();
+        ctx.setLineDash([2, 4]);
+        ctx.strokeStyle = wasAcquired ? 'rgba(200, 90, 50, 0.5)' : 'rgba(61, 122, 90, 0.35)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(dPos.x, dPos.y);
+        ctx.lineTo(loc.x, loc.y);
+        ctx.stroke();
+        ctx.restore();
+      }
     });
 
     // 6. Victims (Surviving trapped casualties)
@@ -195,7 +251,6 @@ export const CanvasSimulation = ({
     }
 
     // 8. UAV Drones
-    const drones = simState?.drones || [];
     drones.forEach((drone) => {
       const isSelected = drone.drone_id === selectedDroneId;
       const status = drone.operational_status || drone.operationalStatus || 'HEALTHY';

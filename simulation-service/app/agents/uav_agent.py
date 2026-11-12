@@ -107,11 +107,12 @@ class UAVAgent:
         self.latest_capabilities = cap_res["capability_vector"]
         self.operational_status = cap_res["operational_status"]
 
-        # 5. Role Selection
+        # 5. Role Selection (incorporates diagnostic confidence & remaining capabilities)
         new_role, feasible_roles, reason = self.role_selector.select_best_role(
             self.current_role,
             self.latest_capabilities,
-            telemetry["battery"]["remaining_pct"]
+            telemetry["battery"]["remaining_pct"],
+            diagnostic_confidence=diagnosis.get("diagnostic_confidence", 0.95)
         )
         role_changed = (new_role != self.current_role)
         previous_role = self.current_role

@@ -103,8 +103,11 @@ class SimulationBridge {
             this.io.emit('task_reallocation_requested', evt);
           } else if (evt.eventType === 'TASK_REASSIGNED') {
             this.io.emit('task_reassigned', evt);
+            this.io.emit('work_reallocated', evt);
           } else if (evt.eventType === 'FAULT_INJECTED') {
             this.io.emit('anomaly_detected', evt);
+          } else if (evt.eventType === 'AUTONOMOUS_WORK_REALLOCATION') {
+            this.io.emit('work_reallocated', evt);
           }
         }
       }
