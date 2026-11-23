@@ -14,7 +14,8 @@ export const getSimulationStatus = () => api.get('/simulation/status');
 export const startSimulation = () => api.post('/simulation/start');
 export const pauseSimulation = () => api.post('/simulation/pause');
 export const setSimulationSpeed = (speed) => api.post('/simulation/speed', { speed });
-export const resetSimulation = (numDrones = 6, seed = 42) => api.post('/simulation/reset', { numDrones, seed });
+export const resetSimulation = (numDrones = 6, seed = 42, buildingComplexity = 'MEDIUM') =>
+  api.post('/simulation/reset', { numDrones, seed, buildingComplexity });
 export const stepSimulation = () => api.post('/simulation/step');
 export const updateEnvironment = (params) => api.post('/simulation/environment', params);
 

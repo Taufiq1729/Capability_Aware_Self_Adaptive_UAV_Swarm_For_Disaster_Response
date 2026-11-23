@@ -61,12 +61,16 @@ class SimulationBridge {
     }
   }
 
-  async reset(numDrones = 6, seed = 42) {
+  async reset(numDrones = 6, seed = 42, buildingComplexity = 'MEDIUM') {
     const wasRunning = this.isRunning;
     if (this.intervalId) clearInterval(this.intervalId);
     
     try {
-      const res = await pythonClient.post('/simulation/reset', { numDrones, seed });
+      const res = await pythonClient.post('/simulation/reset', {
+        numDrones,
+        seed,
+        buildingComplexity
+      });
       this.latestState = res.data.state;
     } catch (e) {
       console.warn('[Bridge] Python reset error:', e.message);
@@ -125,15 +129,16 @@ class SimulationBridge {
   async persistSnapshot(state) {
     if (!state || !state.drones) return;
     for (const d of state.drones) {
+      const dId = d.droneId || d.drone_id;
       await Drone.findOneAndUpdate(
-        { droneId: d.droneId },
+        { droneId: dId },
         {
-          droneId: d.droneId,
+          droneId: dId,
           position: { x: d.x, y: d.y, z: 20 },
-          currentRole: d.currentRole,
+          currentRole: d.currentRole || d.current_role,
           battery: d.battery,
           capabilityVector: d.capabilities,
-          operationalStatus: d.operationalStatus,
+          operationalStatus: d.operationalStatus || d.operational_status,
           diagnosticConfidence: d.diagnostic_confidence,
           assignedTasks: d.assigned_tasks,
           feasibleRoles: d.feasible_roles

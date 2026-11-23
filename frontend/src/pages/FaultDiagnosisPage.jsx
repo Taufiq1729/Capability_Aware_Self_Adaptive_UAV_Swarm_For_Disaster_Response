@@ -11,7 +11,9 @@ import {
   ArrowRight,
   RefreshCw,
   Cpu,
-  Layers
+  Layers,
+  Zap,
+  Target
 } from 'lucide-react';
 
 const FAULT_SCENARIOS = [
@@ -22,7 +24,7 @@ const FAULT_SCENARIOS = [
     faultType: 'hardware_failure',
     severity: 1.0,
     gradual: false,
-    desc: 'Image sensor pipeline ceases output (0 FPS). Primary search cameras offline.'
+    desc: 'Image sensor pipeline ceasing output (0 FPS). Forces autonomous role switch to Relay.'
   },
   {
     id: 'thermal_degrade',
@@ -31,7 +33,7 @@ const FAULT_SCENARIOS = [
     faultType: 'sensor_drift',
     severity: 0.85,
     gradual: false,
-    desc: 'NETD noise elevates to >180mK with calibration bias. Victim heat signatures obscured.'
+    desc: 'NETD noise elevates to >180mK. Victim heat signatures obscured; task reallocated to peer.'
   },
   {
     id: 'lidar_failure',
@@ -40,7 +42,7 @@ const FAULT_SCENARIOS = [
     faultType: 'hardware_failure',
     severity: 0.95,
     gradual: false,
-    desc: 'Laser rangefinder return rate drops below 10k pts/s. High-resolution mapping compromised.'
+    desc: 'Laser rangefinder return rate drops below 10k pts/s. Mapping capability compromised.'
   },
   {
     id: 'motor_degradation',
@@ -58,7 +60,7 @@ const FAULT_SCENARIOS = [
     faultType: 'rapid_discharge',
     severity: 0.85,
     gradual: true,
-    desc: 'Internal resistance causes accelerated voltage drop toward emergency RTL safety margin.'
+    desc: 'Voltage drop triggers emergency RTL safety margin (<18% SoC).'
   },
   {
     id: 'gps_drift',
@@ -67,7 +69,7 @@ const FAULT_SCENARIOS = [
     faultType: 'position_drift',
     severity: 0.80,
     gradual: false,
-    desc: 'HDOP surges past 4.0; position drift exceeds 14 meters. Precision mapping impossible.'
+    desc: 'HDOP surges past 4.0; position drift exceeds 14m. Precision search invalid.'
   },
   {
     id: 'comm_jamming',
@@ -157,22 +159,25 @@ export const FaultDiagnosisPage = () => {
   return (
     <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white border border-cream-300 rounded-2xl p-5 shadow-2xs">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-[0_0_30px_rgba(0,0,0,0.5)]">
         <div>
-          <h2 className="text-xl font-bold text-charcoal-900 leading-tight">
-            Fault Injection & Explainable Edge Diagnosis
+          <h2 className="text-xl font-extrabold text-slate-100 font-mono tracking-tight leading-tight flex items-center space-x-2">
+            <span>Fault Injection & Multi-Stage Edge AI Diagnosis</span>
+            <span className="text-xs px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/30">
+              STAGE 2 & 3
+            </span>
           </h2>
-          <p className="text-sm text-charcoal-600">
-            Inject component failures, simulate environmental smoke obscuration, and inspect the multi-stage AI diagnostic pipeline.
+          <p className="text-sm text-slate-400 font-sans mt-0.5">
+            Inject component failures, simulate environmental smoke obscuration, and inspect the 7-stage AI diagnostic pipeline in real-time.
           </p>
         </div>
 
         <div className="flex items-center space-x-3">
-          <label className="text-xs font-mono text-charcoal-500">Target Node:</label>
+          <label className="text-xs font-mono text-cyan-400 font-bold uppercase">Target Node:</label>
           <select
             value={selectedDroneId}
             onChange={(e) => setSelectedDroneId(e.target.value)}
-            className="text-xs font-bold font-mono text-charcoal-900 bg-cream-100 border border-cream-300 rounded-lg px-3 py-1.5 cursor-pointer"
+            className="text-xs font-bold font-mono text-cyan-300 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 cursor-pointer shadow-inner"
           >
             {drones.map((d) => (
               <option key={d.drone_id} value={d.drone_id}>
@@ -187,14 +192,14 @@ export const FaultDiagnosisPage = () => {
         {/* Left Column: Fault Scenarios & Environment Visibility */}
         <div className="lg:col-span-6 space-y-5">
           {/* Preset Fault Scenarios Card */}
-          <div className="bg-white border border-cream-300 rounded-2xl p-5 shadow-2xs space-y-4">
+          <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold font-mono text-charcoal-900 uppercase tracking-wider flex items-center">
-                <AlertTriangle className="w-4 h-4 mr-2 text-terracotta-500" />
+              <h3 className="text-xs font-bold font-mono text-slate-200 uppercase tracking-wider flex items-center">
+                <AlertTriangle className="w-4 h-4 mr-2 text-cyan-400" />
                 Select Fault Scenario
               </h3>
               {actionNotice && (
-                <span className="text-xs font-mono text-terracotta-600 font-semibold animate-pulse">
+                <span className="text-xs font-mono text-cyan-300 font-bold animate-pulse">
                   {actionNotice}
                 </span>
               )}
@@ -211,22 +216,22 @@ export const FaultDiagnosisPage = () => {
                   }}
                   className={`p-3 rounded-xl border transition cursor-pointer flex items-center justify-between ${
                     activeScenario === sc.id
-                      ? 'bg-terracotta-50 border-terracotta-400 shadow-2xs'
-                      : 'bg-cream-50 border-cream-200 hover:bg-cream-100'
+                      ? 'bg-cyan-950/50 border-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.2)]'
+                      : 'bg-slate-950/50 border-slate-800 hover:bg-slate-800/40'
                   }`}
                 >
                   <div className="space-y-0.5">
-                    <span className="font-semibold text-xs text-charcoal-900 block font-mono">
-                      {sc.name}
+                    <span className="font-bold text-xs text-slate-200 block font-mono flex items-center space-x-1.5">
+                      <span>{sc.name}</span>
                     </span>
-                    <p className="text-[11px] text-charcoal-500 line-clamp-1">{sc.desc}</p>
+                    <p className="text-[11px] text-slate-400 line-clamp-1">{sc.desc}</p>
                   </div>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       handleApplyPreset(sc);
                     }}
-                    className="ml-3 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-cream-300 text-charcoal-800 hover:bg-terracotta-500 hover:text-white hover:border-terracotta-500 transition shadow-2xs shrink-0"
+                    className="ml-3 px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-500 hover:to-orange-500 text-white transition shadow-sm shrink-0"
                   >
                     Inject
                   </button>
@@ -235,10 +240,10 @@ export const FaultDiagnosisPage = () => {
             </div>
 
             {/* Custom Tuning Controls */}
-            <div className="pt-3 border-t border-cream-200 space-y-3">
+            <div className="pt-3 border-t border-slate-800 space-y-3">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-charcoal-600">Custom Severity Parameter:</span>
-                <span className="font-bold text-charcoal-900">
+                <span className="text-slate-400">Custom Severity Parameter:</span>
+                <span className="font-bold text-cyan-400">
                   {Math.round(severitySlider * 100)}%
                 </span>
               </div>
@@ -249,30 +254,30 @@ export const FaultDiagnosisPage = () => {
                 step="0.05"
                 value={severitySlider}
                 onChange={(e) => setSeveritySlider(parseFloat(e.target.value))}
-                className="w-full accent-terracotta-500 cursor-pointer"
+                className="w-full accent-cyan-500 cursor-pointer"
               />
 
-              <div className="flex items-center justify-between text-xs">
-                <label className="flex items-center space-x-2 cursor-pointer font-mono text-charcoal-700">
+              <div className="flex items-center justify-between text-xs font-mono">
+                <label className="flex items-center space-x-2 cursor-pointer text-slate-300">
                   <input
                     type="checkbox"
                     checked={gradualToggle}
                     onChange={(e) => setGradualToggle(e.target.checked)}
-                    className="rounded border-cream-300 text-terracotta-600 focus:ring-terracotta-400"
+                    className="rounded border-slate-700 bg-slate-950 text-cyan-500 focus:ring-cyan-400"
                   />
-                  <span>Gradual Degradation (Simulate Wear & Tear)</span>
+                  <span>Simulate Gradual Degradation</span>
                 </label>
 
                 <div className="space-x-2">
                   <button
                     onClick={handleCustomInject}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-terracotta-500 text-white hover:bg-terracotta-600 transition shadow-2xs"
+                    className="px-3 py-1.5 rounded-lg text-xs font-mono font-bold bg-cyan-600 hover:bg-cyan-500 text-white transition shadow-sm"
                   >
-                    Inject Selected
+                    Inject Custom
                   </button>
                   <button
                     onClick={handleClearAll}
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium bg-cream-200 text-charcoal-700 hover:bg-cream-300 transition border border-cream-300"
+                    className="px-3 py-1.5 rounded-lg text-xs font-mono font-medium bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white transition border border-slate-700"
                   >
                     Reset Node
                   </button>
@@ -282,19 +287,19 @@ export const FaultDiagnosisPage = () => {
           </div>
 
           {/* Environmental Smoke vs Hardware Fault Disambiguation Control */}
-          <div className="bg-white border border-cream-300 rounded-2xl p-5 shadow-2xs space-y-3">
+          <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold font-mono text-charcoal-900 uppercase tracking-wider flex items-center">
-                <Wind className="w-4 h-4 mr-2 text-charcoal-600" />
+              <h3 className="text-xs font-bold font-mono text-slate-200 uppercase tracking-wider flex items-center">
+                <Wind className="w-4 h-4 mr-2 text-cyan-400" />
                 Environmental Obscuration Control
               </h3>
-              <span className="text-xs font-mono font-bold text-charcoal-800">
+              <span className="text-xs font-mono font-bold text-amber-400">
                 {Math.round(dustSlider * 100)}% Dust/Smoke
               </span>
             </div>
 
-            <p className="text-xs text-charcoal-600 leading-relaxed">
-              <strong>Core Research Principle:</strong> Environmental sensing degradation (dense smoke or dust) attenuates optical transmission but does <em>not</em> constitute a physical camera hardware failure. The AI diagnoser distinguishes between environmental obscuration and damaged camera chips.
+            <p className="text-xs text-slate-400 leading-relaxed font-sans">
+              <strong className="text-slate-200 font-mono">Core Research Principle:</strong> Environmental sensing degradation (dense smoke or dust) attenuates optical transmission but does <em>not</em> constitute a physical camera hardware failure. The AI diagnoser distinguishes between environmental obscuration and damaged camera chips.
             </p>
 
             <input
@@ -304,34 +309,34 @@ export const FaultDiagnosisPage = () => {
               step="0.05"
               value={dustSlider}
               onChange={handleDustChange}
-              className="w-full accent-charcoal-700 cursor-pointer"
+              className="w-full accent-amber-500 cursor-pointer"
             />
           </div>
         </div>
 
         {/* Right Column: 5-Stage AI Diagnosis Output Dossier */}
         <div className="lg:col-span-6 space-y-5">
-          <div className="bg-white border border-cream-300 rounded-2xl p-5 shadow-2xs space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-cream-200">
-              <h3 className="text-sm font-bold font-mono text-charcoal-900 uppercase tracking-wider">
-                {selectedDroneId} Multi-Stage Diagnosis Result
+          <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <h3 className="text-xs font-bold font-mono text-slate-100 uppercase tracking-wider">
+                {selectedDroneId} Multi-Stage Diagnosis Output
               </h3>
-              <span className="text-xs font-mono text-charcoal-500">
-                Inference Delay: {diagnosis?.inference_time_ms ?? 1.2}ms
+              <span className="text-xs font-mono text-cyan-400">
+                Inference Latency: <strong>{diagnosis?.inference_time_ms ?? 1.2}ms</strong>
               </span>
             </div>
 
             {/* Stage 2 Anomaly Detection Card */}
-            <div className="p-3.5 rounded-xl bg-cream-50 border border-cream-200 space-y-2">
+            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="font-semibold text-charcoal-800 uppercase tracking-wide">
+                <span className="font-bold text-slate-200 uppercase tracking-wide">
                   Stage 2: Edge Anomaly Detection
                 </span>
                 <span
-                  className={`px-2 py-0.5 rounded font-bold ${
+                  className={`px-2 py-0.5 rounded font-bold text-[10px] ${
                     anomaly?.is_anomalous
-                      ? 'bg-critical-100 text-critical-700'
-                      : 'bg-sage-100 text-sage-700'
+                      ? 'bg-red-950 text-red-400 border border-red-500/30 animate-pulse'
+                      : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
                   }`}
                 >
                   {anomaly?.is_anomalous ? 'ANOMALY DETECTED' : 'NOMINAL LIMITS'}
@@ -339,14 +344,14 @@ export const FaultDiagnosisPage = () => {
               </div>
 
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-charcoal-500">Anomaly Score (0 - 1):</span>
-                <span className="font-bold text-charcoal-900">
+                <span className="text-slate-400">Anomaly Score (0.0 - 1.0):</span>
+                <span className="font-bold text-cyan-300">
                   {anomaly?.anomaly_score ?? 0.0}
                 </span>
               </div>
 
-              <div className="text-xs text-charcoal-600">
-                <span className="font-mono text-charcoal-500 block text-[11px]">
+              <div className="text-xs text-slate-400 font-mono">
+                <span className="text-slate-500 block text-[11px]">
                   Flagged Telemetry Channels:
                 </span>
                 {anomaly?.flagged_channels && anomaly.flagged_channels.length > 0 ? (
@@ -354,31 +359,31 @@ export const FaultDiagnosisPage = () => {
                     {anomaly.flagged_channels.map((ch) => (
                       <span
                         key={ch}
-                        className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-mono text-[10px]"
+                        className="px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-500/30 font-mono text-[10px]"
                       >
                         {ch}
                       </span>
                     ))}
                   </div>
                 ) : (
-                  <span className="text-sage-600 text-[11px]">None (Within envelope)</span>
+                  <span className="text-emerald-400 text-[11px]">None (Within envelope)</span>
                 )}
               </div>
             </div>
 
             {/* Stage 3 Deeper Fault Assessment Card */}
-            <div className="p-3.5 rounded-xl bg-cream-50 border border-cream-200 space-y-2">
+            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="font-semibold text-charcoal-800 uppercase tracking-wide">
-                  Stage 3: Deeper Fault Assessment
+                <span className="font-bold text-slate-200 uppercase tracking-wide">
+                  Stage 3: Deep Fault Assessment
                 </span>
                 <span
-                  className={`px-2 py-0.5 rounded font-bold ${
+                  className={`px-2 py-0.5 rounded font-bold text-[10px] ${
                     diagnosis?.overall_severity === 'CRITICAL'
-                      ? 'bg-critical-100 text-critical-700'
+                      ? 'bg-red-950 text-red-400 border border-red-500/30'
                       : diagnosis?.overall_severity === 'MODERATE'
-                      ? 'bg-amber-100 text-amber-700'
-                      : 'bg-sage-100 text-sage-700'
+                      ? 'bg-amber-950 text-amber-400 border border-amber-500/30'
+                      : 'bg-emerald-950 text-emerald-400 border border-emerald-500/30'
                   }`}
                 >
                   {diagnosis?.overall_severity || 'NONE'} SEVERITY
@@ -387,42 +392,42 @@ export const FaultDiagnosisPage = () => {
 
               <div className="space-y-1 text-xs">
                 <div className="flex justify-between font-mono">
-                  <span className="text-charcoal-500">Fault Category:</span>
-                  <span className="font-semibold text-charcoal-800">
+                  <span className="text-slate-400">Fault Category:</span>
+                  <span className="font-bold text-slate-200">
                     {diagnosis?.primary_fault?.category || 'NOMINAL_OPERATION'}
                   </span>
                 </div>
                 <div className="flex justify-between font-mono">
-                  <span className="text-charcoal-500">Affected Component:</span>
-                  <span className="font-semibold text-charcoal-800">
+                  <span className="text-slate-400">Affected Component:</span>
+                  <span className="font-bold text-slate-200">
                     {diagnosis?.primary_fault?.component || 'None'}
                   </span>
                 </div>
                 <div className="flex justify-between font-mono">
-                  <span className="text-charcoal-500">Diagnostic Confidence:</span>
-                  <span className="font-bold text-terracotta-600">
-                    {(diagnosis?.diagnostic_confidence ?? 0.98) * 100}%
+                  <span className="text-slate-400">Diagnostic Confidence:</span>
+                  <span className="font-extrabold text-cyan-400">
+                    {((diagnosis?.diagnostic_confidence ?? 0.98) * 100).toFixed(0)}%
                   </span>
                 </div>
-                <div className="pt-1.5 border-t border-cream-200 text-charcoal-600 text-[11px]">
-                  <span className="font-mono text-charcoal-500">Diagnostic Evidence: </span>
+                <div className="pt-1.5 border-t border-slate-800 text-slate-300 text-[11px] font-sans">
+                  <span className="font-mono text-cyan-400">Diagnostic Evidence: </span>
                   {diagnosis?.primary_fault?.evidence || 'Telemetry within normal operating variance.'}
                 </div>
               </div>
             </div>
 
             {/* Stage 4: Remaining Capabilities */}
-            <div className="p-3.5 rounded-xl bg-cream-50 border border-cream-200 space-y-2">
-              <span className="font-semibold font-mono text-charcoal-800 uppercase tracking-wide text-xs block">
+            <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800 space-y-2">
+              <span className="font-bold font-mono text-slate-200 uppercase tracking-wide text-xs block">
                 Stage 4: Post-Diagnosis Capabilities
               </span>
               <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                 {Object.entries(cap).map(([k, v]) => (
-                  <div key={k} className="flex justify-between bg-white px-2 py-1 rounded border border-cream-200">
-                    <span className="text-charcoal-500">{k}</span>
+                  <div key={k} className="flex justify-between bg-slate-900 px-2.5 py-1.5 rounded border border-slate-800">
+                    <span className="text-slate-400">{k}</span>
                     <span
                       className={`font-bold ${
-                        v < 0.35 ? 'text-critical-600' : v < 0.6 ? 'text-amber-600' : 'text-sage-700'
+                        v < 0.35 ? 'text-red-400' : v < 0.6 ? 'text-amber-400' : 'text-emerald-400'
                       }`}
                     >
                       {Number(v).toFixed(2)}
@@ -433,17 +438,17 @@ export const FaultDiagnosisPage = () => {
             </div>
 
             {/* Stage 5: Role Adaptation Outcome */}
-            <div className="p-3.5 rounded-xl bg-terracotta-50 border border-terracotta-200 space-y-2">
-              <span className="font-semibold font-mono text-terracotta-800 uppercase tracking-wide text-xs block">
+            <div className="p-3.5 rounded-xl bg-purple-950/40 border border-purple-500/40 space-y-2">
+              <span className="font-bold font-mono text-purple-300 uppercase tracking-wide text-xs block">
                 Stage 5: Safety Constrained Decision
               </span>
               <div className="flex items-center justify-between text-xs font-mono">
-                <span className="text-charcoal-600">Adapted Operational Role:</span>
-                <span className="font-bold text-terracotta-700 bg-white px-2 py-1 rounded border border-terracotta-200">
+                <span className="text-slate-300">Adapted Operational Role:</span>
+                <span className="font-bold text-purple-300 bg-purple-900/60 px-2 py-1 rounded border border-purple-500/40">
                   {droneDetails?.current_role || 'Search and exploration'}
                 </span>
               </div>
-              <p className="text-[11px] text-charcoal-600 leading-relaxed">
+              <p className="text-[11px] text-slate-300 leading-relaxed font-sans">
                 {droneDetails?.adaptation_reason || 'Role constraints successfully satisfied.'}
               </p>
             </div>

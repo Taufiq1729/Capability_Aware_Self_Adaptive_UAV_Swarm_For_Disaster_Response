@@ -51,8 +51,12 @@ export const setSimulationSpeed = async (req, res) => {
 
 export const resetSimulation = async (req, res) => {
   try {
-    const { numDrones, seed } = req.body;
-    await simulationBridge.reset(numDrones || 6, seed !== undefined ? seed : 42);
+    const { numDrones, seed, buildingComplexity } = req.body;
+    await simulationBridge.reset(
+      numDrones || 6,
+      seed !== undefined ? seed : 42,
+      buildingComplexity || 'MEDIUM'
+    );
     res.json({ success: true, message: 'Simulation reset successfully' });
   } catch (err) {
     res.status(500).json({ error: err.message });

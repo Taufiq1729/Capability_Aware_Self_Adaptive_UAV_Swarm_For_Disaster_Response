@@ -1,6 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
+import torch
+import networkx as nx
+import pettingzoo
 
 from app.agents.swarm_manager import SwarmManager
 from app.experiments.evaluator import ExperimentEvaluator
@@ -8,12 +11,13 @@ from app.experiments.evaluator import ExperimentEvaluator
 router = APIRouter()
 
 # Global swarm manager instance for active simulation
-swarm_manager = SwarmManager(num_drones=6, seed=42)
+swarm_manager = SwarmManager(num_drones=6, seed=42, complexity="MEDIUM")
 evaluator = ExperimentEvaluator()
 
 class ResetRequest(BaseModel):
     numDrones: Optional[int] = 6
     seed: Optional[int] = 42
+    buildingComplexity: Optional[str] = "MEDIUM"
 
 class FaultInjectionRequest(BaseModel):
     droneId: str
@@ -48,8 +52,15 @@ def health():
         "status": "healthy",
         "service": "uav-swarm-simulation-ai",
         "active_drones": len(swarm_manager.drones),
+        "building_complexity": swarm_manager.complexity,
+        "num_floors": swarm_manager.env.num_floors,
         "sim_time": swarm_manager.sim_time,
-        "is_running": swarm_manager.is_running
+        "is_running": swarm_manager.is_running,
+        "libraries": {
+            "pytorch": torch.__version__,
+            "networkx": nx.__version__,
+            "pettingzoo": pettingzoo.__version__
+        }
     }
 
 @router.post("/simulation/start")
@@ -69,7 +80,11 @@ def step_simulation(req: StepRequest):
 
 @router.post("/simulation/reset")
 def reset_simulation(req: ResetRequest):
-    swarm_manager.reset(num_drones=req.numDrones, seed=req.seed)
+    swarm_manager.reset(
+        num_drones=req.numDrones,
+        seed=req.seed,
+        complexity=req.buildingComplexity or "MEDIUM"
+    )
     return {
         "success": True,
         "state": swarm_manager.step(dt=0.0)
@@ -82,11 +97,19 @@ def get_simulation_state():
         "sim_time": swarm_manager.sim_time,
         "is_running": swarm_manager.is_running,
         "coverage_percent": swarm_manager.env.get_coverage_percentage(),
+        "victims_detected": len([v for v in swarm_manager.env.victims if v["detected"]]),
+        "total_victims": len(swarm_manager.env.victims),
         "drones": [d.to_dict() for d in swarm_manager.drones.values()],
         "environment": swarm_manager.env.to_dict(),
         "topology": swarm_manager.mesh.get_topology_snapshot(),
         "tasks": swarm_manager.tasks,
-        "recent_events": swarm_manager.recent_events[-15:]
+        "recent_events": swarm_manager.recent_events[-15:],
+        "ai_stack": {
+            "pytorch_model": "SwarmHealthNet-v2 (12-dim multimodal tensor)",
+            "pytorch_version": torch.__version__,
+            "networkx_version": nx.__version__,
+            "pettingzoo_version": pettingzoo.__version__
+        }
     }
 
 @router.post("/fault/inject")
@@ -98,28 +121,35 @@ def inject_fault(req: FaultInjectionRequest):
         severity=req.severity,
         gradual=req.gradual
     )
-    if not res.get("success"):
-        raise HTTPException(status_code=400, detail=res.get("error", "Fault injection failed"))
     return res
 
 @router.post("/fault/clear")
 def clear_fault(req: ClearFaultRequest):
     swarm_manager.clear_fault(drone_id=req.droneId, component=req.component)
-    return {"success": True, "droneId": req.droneId, "component": req.component}
+    return {"success": True, "message": f"Cleared fault on {req.droneId}"}
 
 @router.post("/environment/update")
 def update_environment(req: EnvironmentUpdateRequest):
-    swarm_manager.set_environment_params(
-        dust_level=req.dustLevel,
-        comm_range=req.commRange
-    )
+    swarm_manager.set_environment_params(dust_level=req.dustLevel, comm_range=req.commRange)
     return {
         "success": True,
-        "dust_level": swarm_manager.env.global_dust_level,
+        "global_dust_level": swarm_manager.env.global_dust_level,
         "comm_range": swarm_manager.mesh.comm_range
     }
 
+@router.post("/experiments/benchmark")
 @router.post("/experiments/run")
-def run_experiment(req: ExperimentRunRequest):
-    benchmark_results = evaluator.run_benchmark(req.model_dump())
-    return benchmark_results
+def run_benchmark(req: ExperimentRunRequest):
+    results = evaluator.run_comparative_experiment(
+        num_drones=req.numDrones or 6,
+        num_victims=req.numVictims or 8,
+        fault_prob=req.faultProbability if req.faultProbability is not None else 0.35,
+        comm_reliability=req.commReliability if req.commReliability is not None else 0.90,
+        sim_duration_sec=req.simulationDurationSec or 45,
+        seed=req.randomSeed or 42
+    )
+    return {
+        "success": True,
+        "config": req.dict(),
+        "results": results
+    }

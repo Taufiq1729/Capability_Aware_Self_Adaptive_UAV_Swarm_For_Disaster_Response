@@ -20,6 +20,29 @@ class ExperimentEvaluator:
     def __init__(self):
         pass
 
+    def run_comparative_experiment(
+        self,
+        num_drones: int = 6,
+        num_victims: int = 8,
+        fault_prob: float = 0.35,
+        comm_reliability: float = 0.90,
+        sim_duration_sec: int = 45,
+        seed: int = 42
+    ) -> Dict[str, Any]:
+        """
+        Wrapper executing comparative experiments across all 4 baselines.
+        """
+        config = {
+            "numDrones": num_drones,
+            "numVictims": num_victims,
+            "faultProbability": fault_prob,
+            "commReliability": comm_reliability,
+            "simulationDurationSec": sim_duration_sec,
+            "randomSeed": seed
+        }
+        res = self.run_benchmark(config)
+        return res.get("results", {})
+
     def run_benchmark(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """
         Runs empirical multi-step simulations for all 4 baselines under identical initial seeds.

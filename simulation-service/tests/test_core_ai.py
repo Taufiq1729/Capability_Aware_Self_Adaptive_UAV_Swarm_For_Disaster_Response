@@ -241,5 +241,77 @@ class TestCoreAIArchitecture(unittest.TestCase):
         self.assertNotIn("TSK-101", alpha.assigned_tasks)
         self.assertTrue(len(alpha.assigned_tasks) > 0)
 
+    def test_role_dependent_battery_consumption(self):
+        """
+        Verify:
+        At start, all drones work for searching where battery reduces at the same rate.
+        After role switching to relay, relay drone consumes substantially less battery.
+        """
+        from app.agents.swarm_manager import SwarmManager
+        sm = SwarmManager(num_drones=4, seed=42)
+        
+        # At start, all drones must be on Search
+        for d in sm.drones.values():
+            self.assertEqual(d.current_role, "Search and exploration")
+            
+        # Run 2 steps
+        sm.step(dt=1.0)
+        sm.step(dt=1.0)
+        
+        # All drones have reduced battery at the same rate
+        drains = [d.telemetry_gen.latest_drain_rate for d in sm.drones.values()]
+        self.assertAlmostEqual(drains[0], drains[1], delta=0.05)
+        self.assertGreaterEqual(drains[0], 0.30) # ~0.35% for active search
+        
+        # Force UAV-Alpha to adapt to Communication relay
+        alpha = sm.drones["UAV-Alpha"]
+        alpha.current_role = "Communication relay"
+        
+        # Step again
+        sm.step(dt=1.0)
+        
+        # Relay drone now consumes significantly less battery than search drone!
+        beta = sm.drones["UAV-Beta"] # Beta is still on Search
+        self.assertLess(alpha.telemetry_gen.latest_drain_rate, 0.18) # ~0.10%
+        self.assertGreater(beta.telemetry_gen.latest_drain_rate, 0.30) # ~0.35%
+        self.assertLess(alpha.telemetry_gen.latest_drain_rate, beta.telemetry_gen.latest_drain_rate * 0.5)
+
+    def test_multistorey_and_pettingzoo_pytorch_integration(self):
+        """
+        Verify PyTorch SwarmHealthNet, PettingZoo ParallelEnv, and Multistorey Environment
+        """
+        # 1. PyTorch SwarmHealthNet verification
+        from app.edge_ai.torch_health_model import PyTorchHealthEvaluator
+        evaluator = PyTorchHealthEvaluator()
+        t = self.telemetry_gen.step()
+        res = evaluator.evaluate(t)
+        self.assertEqual(res["model_type"], "PyTorch-SwarmHealthNet-v2")
+        self.assertIn("diagnostic_confidence", res)
+        self.assertIn("component_health", res)
+        self.assertIn("rgb_camera", res["component_health"])
+
+        # 2. PettingZoo Environment verification
+        from app.environment.pettingzoo_env import DisasterSwarmParallelEnv
+        pz_env = DisasterSwarmParallelEnv(num_drones=4, num_floors=3)
+        obs, infos = pz_env.reset()
+        self.assertEqual(len(obs), 4)
+        self.assertIn("UAV-0", obs)
+        actions = {agent: np.array([1.0, 0.0, 0.0, 0.2], dtype=np.float32) for agent in pz_env.agents}
+        next_obs, rewards, terms, truncs, next_infos = pz_env.step(actions)
+        self.assertEqual(len(rewards), 4)
+
+        # 3. Multistorey Building Complexity verification
+        from app.environment.disaster_env import DisasterEnvironment
+        env_high = DisasterEnvironment(complexity="HIGH", seed=42)
+        self.assertEqual(env_high.num_floors, 5)
+        self.assertTrue(len(env_high.rooms) >= 8)
+        self.assertTrue(len(env_high.victims) >= 8)
+        # Check human victim attributes
+        v0 = env_high.victims[0]
+        self.assertIn("vital_temp_c", v0)
+        self.assertIn("pulse_bpm", v0)
+        self.assertIn("floor", v0)
+        self.assertIn("body_posture", v0)
+
 if __name__ == "__main__":
     unittest.main()

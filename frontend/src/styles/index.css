@@ -3,53 +3,85 @@
 @tailwind utilities;
 
 :root {
-  --bg-cream: #FAF7F2;
-  --bg-card: #FFFFFF;
-  --border-subtle: #E8DFD0;
-  --text-primary: #1C1917;
-  --text-secondary: #57534E;
-  --terracotta: #C85A32;
-  --sage-green: #3D7A5A;
-  --amber-warning: #D97706;
-  --red-critical: #C53030;
+  --bg-dark: #070B14;
+  --bg-card: rgba(11, 17, 30, 0.85);
+  --border-glass: rgba(56, 189, 248, 0.15);
+  --text-primary: #F8FAFC;
+  --text-secondary: #94A3B8;
+  --cyan-accent: #06B6D4;
+  --emerald-accent: #10B981;
+  --amber-accent: #F59E0B;
+  --rose-accent: #EF4444;
 }
 
 body {
   margin: 0;
-  background-color: #FAF7F2;
-  color: #292524;
+  background-color: #070B14;
+  color: #F1F5F9;
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
+  background-image: 
+    radial-gradient(circle at 50% 0%, rgba(6, 182, 212, 0.08) 0%, transparent 60%),
+    radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+  min-height: 100vh;
 }
 
-/* Custom subtle scrollbar */
+/* Glass card aerospace styling */
+.glass-panel {
+  background: rgba(11, 17, 30, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(56, 189, 248, 0.12);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.45);
+}
+
+.glass-panel-glow {
+  background: rgba(15, 23, 42, 0.88);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(6, 182, 212, 0.3);
+  box-shadow: 0 0 25px -5px rgba(6, 182, 212, 0.25);
+}
+
+/* Tactical HUD scanline effect */
+.hud-scanline {
+  background: linear-gradient(
+    to bottom,
+    rgba(255,255,255,0),
+    rgba(255,255,255,0) 50%,
+    rgba(0, 0, 0, 0.3) 50%,
+    rgba(0, 0, 0, 0.3)
+  );
+  background-size: 100% 4px;
+}
+
+/* Custom sleek dark scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #FAF7F2;
+  background: #070B14;
 }
 ::-webkit-scrollbar-thumb {
-  background: #D9CBB7;
+  background: #1E2D4A;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #B44C27;
+  background: #06B6D4;
 }
 
-/* Custom animation pulses */
+/* Signal Pulse Animation */
 @keyframes signal-pulse {
-  0% { transform: scale(0.95); opacity: 0.8; }
-  50% { transform: scale(1.15); opacity: 0.3; }
-  100% { transform: scale(0.95); opacity: 0.8; }
+  0% { transform: scale(0.95); opacity: 0.9; }
+  50% { transform: scale(1.15); opacity: 0.4; }
+  100% { transform: scale(0.95); opacity: 0.9; }
 }
 
 .animate-signal {
   animation: signal-pulse 2s infinite ease-in-out;
 }
 
-/* Radar ping */
+/* Radar Sweep Animation */
 @keyframes radar-sweep {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -57,4 +89,21 @@ body {
 
 .radar-spinner {
   animation: radar-sweep 4s linear infinite;
+}
+
+/* Neon glow utility classes */
+.glow-cyan {
+  text-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+}
+
+.glow-emerald {
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.6);
+}
+
+.glow-amber {
+  text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+}
+
+.glow-red {
+  text-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
 }

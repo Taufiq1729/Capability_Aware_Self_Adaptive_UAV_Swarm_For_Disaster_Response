@@ -9,12 +9,14 @@ class P2PCommunicationMesh:
     Stage 6: Peer-to-Peer Ad-hoc Communication Mesh using NetworkX.
     Models wireless topology, distance attenuation, message packet loss,
     and temporary network partitions without any central gateway.
+    Computes NetworkX graph metrics including betweenness centrality
+    to prove how Relay nodes bridge separate search clusters.
     """
-    def __init__(self, comm_range: float = 230.0, base_packet_loss: float = 0.04):
+    def __init__(self, comm_range: float = 240.0, base_packet_loss: float = 0.03):
         self.comm_range = comm_range
         self.base_packet_loss = base_packet_loss
         self.graph = nx.Graph()
-        self.message_queues: Dict[str, List[Dict[str, Any]]] = {} # drone_id -> messages
+        self.message_queues: Dict[str, List[Dict[str, Any]]] = {}
 
     def update_topology(self, drone_positions: Dict[str, Tuple[float, float]], drone_comm_health: Dict[str, float]) -> nx.Graph:
         """
@@ -39,7 +41,6 @@ class P2PCommunicationMesh:
                 effective_range = self.comm_range * min(drone_comm_health.get(id_a, 1.0), drone_comm_health.get(id_b, 1.0))
                 
                 if dist <= effective_range:
-                    # Packet delivery probability decreases with distance
                     dist_factor = dist / max(1.0, effective_range)
                     loss_prob = self.base_packet_loss + 0.35 * (dist_factor ** 2)
                     self.graph.add_edge(id_a, id_b, distance=round(dist, 1), loss_prob=round(loss_prob, 3))
@@ -47,10 +48,6 @@ class P2PCommunicationMesh:
         return self.graph
 
     def broadcast_message(self, sender_id: str, payload: Dict[str, Any], sim_time: float) -> List[Dict[str, Any]]:
-        """
-        Broadcasts a message from sender to all 1-hop reachable peers,
-        accounting for simulated packet drop.
-        """
         delivered = []
         if sender_id not in self.graph:
             return delivered
@@ -60,14 +57,13 @@ class P2PCommunicationMesh:
             edge_data = self.graph.get_edge_data(sender_id, target_id)
             loss_prob = edge_data.get("loss_prob", 0.05) if edge_data else 0.05
             
-            # Stochastic packet loss
             if random.random() >= loss_prob:
                 msg = {
                     "sender_id": sender_id,
                     "target_id": target_id,
                     "payload": payload,
                     "sim_time": sim_time,
-                    "latency_ms": round(random.uniform(15.0, 45.0), 1)
+                    "latency_ms": round(random.uniform(12.0, 38.0), 1)
                 }
                 self.message_queues[target_id].append(msg)
                 delivered.append(msg)
@@ -80,7 +76,7 @@ class P2PCommunicationMesh:
         return msgs
 
     def get_topology_snapshot(self) -> Dict[str, Any]:
-        """Returns JSON-serializable snapshot of the graph nodes, edges and partitions"""
+        """Returns JSON-serializable snapshot of the NetworkX graph nodes, edges and metrics"""
         nodes = []
         for n in self.graph.nodes:
             pos = self.graph.nodes[n].get("pos", (0, 0))
@@ -98,10 +94,21 @@ class P2PCommunicationMesh:
         connected_components = [list(c) for c in nx.connected_components(self.graph)]
         is_partitioned = len(connected_components) > 1
 
+        # NetworkX Advanced Graph Centrality & Spectral Metrics
+        betweenness = {}
+        clustering_coeff = 0.0
+        if len(self.graph.nodes) > 0:
+            raw_betweenness = nx.betweenness_centrality(self.graph)
+            betweenness = {k: round(v, 3) for k, v in raw_betweenness.items()}
+            clustering_coeff = round(float(nx.average_clustering(self.graph)), 3)
+
         return {
             "nodes": nodes,
             "edges": edges,
             "connected_components": connected_components,
             "is_partitioned": is_partitioned,
-            "num_links": len(edges)
+            "num_links": len(edges),
+            "betweenness_centrality": betweenness,
+            "clustering_coefficient": clustering_coeff,
+            "library": "NetworkX v" + nx.__version__
         }

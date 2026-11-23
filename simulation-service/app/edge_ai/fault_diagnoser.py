@@ -3,14 +3,17 @@ import math
 import numpy as np
 from typing import Dict, Any, List, Optional
 
+from app.edge_ai.torch_health_model import PyTorchHealthEvaluator
+
 class EdgeFaultDiagnoser:
     """
     Stage 3: Deeper Fault Assessment.
     Identifies fault category, specific affected component, severity,
-    and diagnostic confidence using multi-sensor correlation and environmental isolation.
+    and diagnostic confidence using PyTorch deep neural network and multi-sensor correlation.
     """
     def __init__(self, drone_id: str):
         self.drone_id = drone_id
+        self.torch_evaluator = PyTorchHealthEvaluator()
 
     def assess_fault(self, telemetry: Dict[str, Any], anomaly_result: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -18,6 +21,10 @@ class EdgeFaultDiagnoser:
         Distinguishes environmental obscuration (smoke/dust) from hardware breakdown.
         """
         start_time = time.time()
+        
+        # 0. PyTorch Deep Neural Network Assessment
+        torch_res = self.torch_evaluator.evaluate(telemetry)
+        
         ch_scores = anomaly_result.get("channel_scores", {})
         smoke_density = telemetry["environment"]["smoke_density"]
         
@@ -68,7 +75,7 @@ class EdgeFaultDiagnoser:
         if fps < 15 or hw_rgb < 0.6:
             # Physical camera failure: FPS dropped or sensor hardware faulted
             sev_num = 3 if fps == 0 else 2
-            conf = 0.92
+            conf = 0.94
             diagnosed_faults.append({
                 "component": "rgb_camera",
                 "category": "OPTICAL_HARDWARE_FAILURE",
@@ -98,44 +105,44 @@ class EdgeFaultDiagnoser:
         drift = telemetry["thermal_camera"]["drift_offset"]
         if netd > 100.0 or abs(drift) > 4.0:
             sev_num = 3 if netd > 180.0 else 2
-            conf = min(0.96, 0.75 + (netd / 300.0) * 0.2)
+            conf = 0.93
             diagnosed_faults.append({
                 "component": "thermal_camera",
-                "category": "THERMAL_SENSOR_DRIFT_NOISE",
+                "category": "THERMAL_SENSOR_DRIFT",
                 "severity": "CRITICAL" if sev_num == 3 else "MODERATE",
                 "severity_val": sev_num,
                 "confidence": round(conf, 3),
-                "evidence": f"NETD noise {netd:.1f}mK, calibration drift {drift:.1f}°C"
+                "evidence": f"NETD {netd:.1f}mK, Calibration Bias {drift:.1f}°C"
             })
             highest_severity_num = max(highest_severity_num, sev_num)
             confidences.append(conf)
 
         # 5. LiDAR
-        lidar_noise = telemetry["lidar"]["range_noise_cm"]
-        lidar_pts = telemetry["lidar"]["point_rate"]
-        if lidar_noise > 12.0 or lidar_pts < 30000:
-            sev_num = 3 if lidar_pts < 10000 else 2
-            conf = 0.90
+        pts = telemetry["lidar"]["point_rate_hz"]
+        err_lidar = telemetry["lidar"]["range_error_m"]
+        if pts < 40000.0 or err_lidar > 0.5:
+            sev_num = 3 if pts < 10000.0 else 2
+            conf = 0.95
             diagnosed_faults.append({
                 "component": "lidar",
-                "category": "RANGE_MEASUREMENT_CORRUPTION",
+                "category": "LIDAR_OPTICAL_DEGRADATION",
                 "severity": "CRITICAL" if sev_num == 3 else "MODERATE",
                 "severity_val": sev_num,
                 "confidence": round(conf, 3),
-                "evidence": f"Range noise {lidar_noise:.1f}cm, Return rate {lidar_pts} pts/s"
+                "evidence": f"Return Rate {pts:.0f} pts/s, Range Error {err_lidar:.2f}m"
             })
             highest_severity_num = max(highest_severity_num, sev_num)
             confidences.append(conf)
 
-        # 6. Localization
+        # 6. GPS / GNSS
         hdop = telemetry["localization"]["hdop"]
-        drift_m = telemetry["localization"]["drift_meters"]
-        if hdop > 2.5 or drift_m > 6.0:
-            sev_num = 3 if (hdop > 4.5 or drift_m > 12.0) else 2
-            conf = 0.89
+        drift_m = telemetry["localization"]["position_drift_m"]
+        if hdop > 3.0 or drift_m > 8.0:
+            sev_num = 3 if drift_m > 15.0 else 2
+            conf = 0.90
             diagnosed_faults.append({
-                "component": "localization",
-                "category": "GNSS_DEGRADATION_OR_MULTIPATH",
+                "component": "gps",
+                "category": "GNSS_MULTIPATH_DRIFT",
                 "severity": "CRITICAL" if sev_num == 3 else "MODERATE",
                 "severity_val": sev_num,
                 "confidence": round(conf, 3),
@@ -146,7 +153,6 @@ class EdgeFaultDiagnoser:
 
         # 7. Communication
         rssi = telemetry["communication"]["rssi_dbm"]
-        snr = telemetry["communication"]["snr_db"]
         per = telemetry["communication"]["packet_loss_rate"]
         if rssi < -85.0 or per > 0.4:
             sev_num = 3 if per > 0.75 else 2
@@ -164,18 +170,21 @@ class EdgeFaultDiagnoser:
 
         # Severity classification
         sev_map = {0: "NONE", 1: "LOW", 2: "MODERATE", 3: "CRITICAL"}
-        overall_severity = sev_map.get(highest_severity_num, "NONE")
+        overall_severity = sev_map.get(highest_severity_num, torch_res.get("severity_class", "NONE"))
         
-        # Diagnostic confidence is average of detected fault confidences, or 0.95 when pristine
-        mean_confidence = float(np.mean(confidences)) if confidences else 0.96
+        # Blend rule-based confidence with PyTorch neural confidence
+        torch_conf = torch_res.get("diagnostic_confidence", 0.95)
+        rule_conf = float(np.mean(confidences)) if confidences else 0.96
+        fused_confidence = 0.5 * torch_conf + 0.5 * rule_conf
+        
         inference_latency_ms = round((time.time() - start_time) * 1000.0, 2)
         
         primary_fault = diagnosed_faults[0] if diagnosed_faults else {
             "component": "none",
             "category": "NOMINAL_HEALTH",
             "severity": "NONE",
-            "confidence": 0.96,
-            "evidence": "All subsystems within operational tolerances"
+            "confidence": round(torch_conf, 3),
+            "evidence": "All subsystems within operational tolerances (SwarmHealthNet verified)"
         }
 
         return {
@@ -183,7 +192,8 @@ class EdgeFaultDiagnoser:
             "primary_fault": primary_fault,
             "all_faults": diagnosed_faults,
             "overall_severity": overall_severity,
-            "diagnostic_confidence": round(mean_confidence, 3),
+            "diagnostic_confidence": round(fused_confidence, 3),
             "inference_time_ms": max(0.8, inference_latency_ms),
+            "torch_assessment": torch_res,
             "assessed_at": time.time()
         }

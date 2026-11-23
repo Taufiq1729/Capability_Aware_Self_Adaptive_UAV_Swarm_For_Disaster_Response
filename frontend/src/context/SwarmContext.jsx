@@ -9,6 +9,8 @@ export const SwarmProvider = ({ children }) => {
   const [isRunning, setIsRunning] = useState(false);
   const [simSpeed, setSimSpeed] = useState(1.0);
   const [selectedDroneId, setSelectedDroneId] = useState('UAV-Alpha');
+  const [droneCount, setDroneCount] = useState(6);
+  const [buildingComplexity, setBuildingComplexity] = useState('MEDIUM');
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('connecting');
   const [eventLog, setEventLog] = useState([]);
@@ -94,9 +96,11 @@ export const SwarmProvider = ({ children }) => {
     }
   };
 
-  const handleReset = async (numDrones = 6, seed = 42) => {
+  const handleReset = async (numDrones = droneCount, seed = 42, complexity = buildingComplexity) => {
     try {
-      await api.resetSimulation(numDrones, seed);
+      setDroneCount(numDrones);
+      setBuildingComplexity(complexity);
+      await api.resetSimulation(numDrones, seed, complexity);
       await fetchInitialState();
     } catch (err) {
       console.error('Reset error:', err);
@@ -153,6 +157,10 @@ export const SwarmProvider = ({ children }) => {
         selectedDroneId,
         setSelectedDroneId,
         selectedDroneState,
+        droneCount,
+        setDroneCount,
+        buildingComplexity,
+        setBuildingComplexity,
         connectionStatus,
         eventLog,
         loading,

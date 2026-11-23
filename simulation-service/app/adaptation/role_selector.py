@@ -20,13 +20,12 @@ class SafetyConstrainedRoleSelector:
     def evaluate_role_feasibility(self, cap: Dict[str, float], battery_pct: float) -> Dict[str, bool]:
         """
         Evaluates hard physical constraints for each role independently.
-        Returns a dictionary of role -> is_feasible.
+        A role is strictly barred if its mandatory primary subsystem is degraded or failed.
         """
         feasibility = {}
 
-        # Battery emergency check
-        if battery_pct < 18.0 or cap["c_Energy"] < 0.18 or cap["c_Mobility"] < 0.25:
-            # All active operational roles are strictly barred
+        # Battery emergency check or severe propulsion failure
+        if battery_pct < 18.0 or cap.get("c_Energy", 1.0) < 0.18 or cap.get("c_Mobility", 1.0) < 0.22:
             return {
                 "Search and exploration": False,
                 "Victim detection": False,
@@ -35,45 +34,49 @@ class SafetyConstrainedRoleSelector:
                 "Return to Home / Land": True
             }
 
-        # 1. Search and exploration
-        # Mandatory: High-framerate RGB optical camera pipeline
-        search_sensor_ok = (cap.get("c_RGB", 0.0) >= 0.45)
+        # 1. Search and exploration:
+        # Mandatory: RGB optical camera pipeline (c_RGB >= 0.50) and active mobility
+        search_sensor_ok = (cap.get("c_RGB", 0.0) >= 0.50)
         feasibility["Search and exploration"] = bool(
             search_sensor_ok and
             cap.get("c_Mobility", 0.0) >= 0.45 and
             cap.get("c_Localization", 0.0) >= 0.40 and
             cap.get("c_Energy", 0.0) >= 0.22 and
-            cap.get("c_Compute", 0.0) >= 0.30
+            battery_pct >= 22.0
         )
 
-        # 2. Victim detection
-        # Mandatory: Thermal capability (vital for locating survivors trapped under rubble/smoke)
-        # or exceptionally high RGB clarity if smoke is absent
-        victim_sensor_ok = (cap["c_Thermal"] >= 0.50) or (cap["c_RGB"] >= 0.65)
+        # 2. Victim detection:
+        # Mandatory: High-sensitivity Radiometric Thermal FLIR camera (c_Thermal >= 0.55)
+        # Cannot be performed if thermal sensor is corrupted or drifting
+        victim_sensor_ok = (cap.get("c_Thermal", 0.0) >= 0.55)
         feasibility["Victim detection"] = bool(
             victim_sensor_ok and
-            cap["c_Mobility"] >= 0.35 and
-            cap["c_Localization"] >= 0.40 and
-            cap["c_Energy"] >= 0.20
+            cap.get("c_Mobility", 0.0) >= 0.35 and
+            cap.get("c_Localization", 0.0) >= 0.40 and
+            cap.get("c_Energy", 0.0) >= 0.20 and
+            battery_pct >= 20.0
         )
 
-        # 3. Mapping and reconnaissance
-        # Mandatory: High localization precision and LiDAR or high-res camera
-        mapping_sensor_ok = (cap["c_LiDAR"] >= 0.48) or (cap["c_RGB"] >= 0.60)
+        # 3. Mapping and reconnaissance:
+        # Mandatory: Precision LiDAR rangefinder return (c_LiDAR >= 0.50) and centimeter GPS
+        mapping_sensor_ok = (cap.get("c_LiDAR", 0.0) >= 0.50)
         feasibility["Mapping and reconnaissance"] = bool(
             mapping_sensor_ok and
-            cap["c_Localization"] >= 0.50 and
-            cap["c_Mobility"] >= 0.40 and
-            cap["c_Energy"] >= 0.22
+            cap.get("c_Localization", 0.0) >= 0.50 and
+            cap.get("c_Mobility", 0.0) >= 0.40 and
+            cap.get("c_Energy", 0.0) >= 0.22 and
+            battery_pct >= 22.0
         )
 
-        # 4. Communication relay
+        # 4. Communication relay:
         # Dedicated to high-throughput wireless bridging; requires strong radio link
+        # Can loiter/hover in place, so mobility constraint is minimal
+        relay_radio_ok = (cap.get("c_Communication", 0.0) >= 0.55)
         feasibility["Communication relay"] = bool(
-            cap["c_Communication"] >= 0.55 and
-            cap["c_Mobility"] >= 0.25 and # Hovering or low-speed loitering acceptable
-            cap["c_Localization"] >= 0.25 and
-            cap["c_Energy"] >= 0.18
+            relay_radio_ok and
+            cap.get("c_Mobility", 0.0) >= 0.20 and
+            cap.get("c_Energy", 0.0) >= 0.18 and
+            battery_pct >= 18.0
         )
 
         # 5. RTL / Safe Land is always feasible as a safety fallback
@@ -108,17 +111,32 @@ class SafetyConstrainedRoleSelector:
         feasibility = self.evaluate_role_feasibility(cap, battery_pct)
         feasible_roles = [r for r, ok in feasibility.items() if ok and r != "Return to Home / Land"]
 
-        # If current role is still feasible and has good health, preserve role stability
-        if current_role in feasible_roles:
-            return current_role, feasible_roles, "Current role constraints satisfied"
+        # Battery emergency check (< 18%)
+        if battery_pct < 18.0 or cap.get("c_Energy", 1.0) < 0.18:
+            return (
+                "Return to Home / Land",
+                ["Return to Home / Land"],
+                f"Low battery emergency ({battery_pct:.1f}% < 18%): Local safety abort triggered (Return to Home)"
+            )
 
         # If no active mission roles are feasible, trigger RTL
         if not feasible_roles:
             return (
                 "Return to Home / Land",
                 ["Return to Home / Land"],
-                "Critical hardware or energy degradation: Local safety abort triggered"
+                "Critical hardware degradation: All operational roles barred. Local safety abort triggered."
             )
+
+        # Verify whether the primary capability for the current role is still healthy
+        current_role_viable = (current_role in feasible_roles)
+        if current_role == "Search and exploration" and cap.get("c_RGB", 0.0) < 0.50:
+            current_role_viable = False
+        elif current_role == "Victim detection" and cap.get("c_Thermal", 0.0) < 0.55:
+            current_role_viable = False
+        elif current_role == "Mapping and reconnaissance" and cap.get("c_LiDAR", 0.0) < 0.50:
+            current_role_viable = False
+        elif current_role == "Communication relay" and cap.get("c_Communication", 0.0) < 0.55:
+            current_role_viable = False
 
         # Autonomous utility calculation for feasible candidate roles
         # Weighted operational utility matching surviving onboard sensors
@@ -137,6 +155,15 @@ class SafetyConstrainedRoleSelector:
                 u = 0.10
             role_utilities[r] = round(u, 4)
 
+        # Best role by capability utility
         best_role = max(role_utilities.items(), key=lambda x: x[1])[0]
-        reason = f"Autonomously adapted from '{current_role}' to '{best_role}' based on remaining capability utility (Diagnostic Confidence: {round(diagnostic_confidence * 100)}%)"
+
+        # If current role is viable and not significantly outclassed, preserve role stability
+        if current_role_viable:
+            current_util = role_utilities.get(current_role, 0.0)
+            best_util = role_utilities[best_role]
+            if best_util - current_util <= 0.15:
+                return current_role, feasible_roles, "Current role constraints satisfied and operational"
+
+        reason = f"Health-driven adaptation: Role switched from '{current_role}' to '{best_role}' based on remaining capability utility (Diag Conf: {round(diagnostic_confidence * 100)}%)"
         return best_role, feasible_roles, reason
