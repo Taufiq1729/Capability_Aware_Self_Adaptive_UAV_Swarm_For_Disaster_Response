@@ -760,14 +760,52 @@ export const ThreeBuildingSimulation = ({
         if (droneGroup && droneGroup.userData) {
           const rotors = droneGroup.userData.rotors || [];
           rotors.forEach((rotor, rIdx) => {
-            rotor.rotation.y += 0.44 * (rIdx % 2 === 0 ? 1 : -1);
+            rotor.rotation.y += 0.48 * (rIdx % 2 === 0 ? 1 : -1);
           });
-          droneGroup.position.y += Math.sin(t * 4 + droneGroup.userData.index) * 0.012;
+
+          // Continuous smooth position interpolation at 60 FPS
+          if (droneGroup.userData.targetPos) {
+            droneGroup.position.x = THREE.MathUtils.lerp(droneGroup.position.x, droneGroup.userData.targetPos.x, 0.08);
+            droneGroup.position.z = THREE.MathUtils.lerp(droneGroup.position.z, droneGroup.userData.targetPos.z, 0.08);
+            const targetY = droneGroup.userData.targetPos.y + Math.sin(t * 4 + droneGroup.userData.index) * 0.015;
+            droneGroup.position.y = THREE.MathUtils.lerp(droneGroup.position.y, targetY, 0.10);
+          } else {
+            droneGroup.position.y += Math.sin(t * 4 + droneGroup.userData.index) * 0.012;
+          }
+
+          if (droneGroup.userData.targetRot !== undefined) {
+            droneGroup.rotation.y = THREE.MathUtils.lerp(droneGroup.rotation.y, droneGroup.userData.targetRot, 0.08);
+          }
+          if (droneGroup.userData.targetBank !== undefined) {
+            droneGroup.rotation.z = THREE.MathUtils.lerp(droneGroup.rotation.z, droneGroup.userData.targetBank, 0.08);
+          }
 
           const halo = droneGroup.userData.halo;
           if (halo) {
-            const haloPulse = 1.0 + Math.sin(t * 3 + droneGroup.userData.index) * 0.08;
+            const haloPulse = 1.0 + Math.sin(t * 3.5 + droneGroup.userData.index) * 0.12;
             halo.scale.set(haloPulse, haloPulse, haloPulse);
+          }
+
+          // Pulse ring ascending along vertical beacon pillar
+          const pRing = droneGroup.userData.pulseRing;
+          if (pRing) {
+            const prog = ((t * 0.7 + droneGroup.userData.index * 0.2) % 1.0);
+            pRing.position.y = prog * 28.0;
+            pRing.material.opacity = 0.85 * (1.0 - prog);
+          }
+
+          // Expanding ground scanning ping
+          const gPing = droneGroup.userData.groundPing;
+          if (gPing) {
+            const pingScale = 0.8 + ((t * 1.5 + droneGroup.userData.index * 0.3) % 1.5);
+            gPing.scale.set(pingScale, pingScale, 1.0);
+            gPing.material.opacity = Math.max(0, 0.7 - (pingScale - 0.8) * 0.5);
+          }
+
+          // Rotating top diamond beacon
+          const diamond = droneGroup.userData.diamond;
+          if (diamond) {
+            diamond.rotation.y += 0.04;
           }
         }
       });
@@ -1084,31 +1122,74 @@ export const ThreeBuildingSimulation = ({
       const droneId = drone.drone_id;
       const colorHex = DRONE_COLORS[idx % DRONE_COLORS.length];
       const floorLevel = Math.max(1, Math.min(5, drone.floor || 1));
-      const baseAlt = getFloorBaseY(floorLevel) + 4.8;
+      const baseAlt = getFloorBaseY(floorLevel) + 5.5;
 
       const worldX = ((drone.x - 400) / 400) * 33;
       const worldZ = ((drone.y - 300) / 300) * 23;
       const worldY = baseAlt + (drone.z ? (drone.z / 36) * 2.0 : 0);
 
       if (!droneMeshes[droneId]) {
-        const droneGroup = createQuadcopterMesh(colorHex, idx, droneId, drone.current_role);
+        const droneGroup = createQuadcopterMesh(colorHex, idx, droneId, drone.current_role, floorLevel, drone.battery || 98);
         droneGroup.position.set(worldX, worldY, worldZ);
-        droneGroup.userData = { id: droneId, index: idx, color: colorHex };
+        droneGroup.userData = {
+          ...droneGroup.userData,
+          id: droneId,
+          index: idx,
+          color: colorHex,
+          targetPos: new THREE.Vector3(worldX, worldY, worldZ),
+          targetRot: 0,
+          targetBank: 0,
+          role: drone.current_role,
+          floor: floorLevel,
+          battery: drone.battery || 98
+        };
         scene.add(droneGroup);
         droneMeshes[droneId] = droneGroup;
       } else {
         const group = droneMeshes[droneId];
-        const targetPos = new THREE.Vector3(worldX, worldY, worldZ);
-
-        const moveDelta = targetPos.clone().sub(group.position);
-        if (moveDelta.length() > 0.05) {
-          const targetRot = Math.atan2(-moveDelta.z, moveDelta.x);
-          group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, targetRot, 0.16);
-          const bankAngle = Math.min(0.28, moveDelta.length() * 0.16);
-          group.rotation.z = THREE.MathUtils.lerp(group.rotation.z, -bankAngle, 0.14);
+        if (!group.userData.targetPos) {
+          group.userData.targetPos = new THREE.Vector3(worldX, worldY, worldZ);
+        } else {
+          group.userData.targetPos.set(worldX, worldY, worldZ);
         }
 
-        group.position.lerp(targetPos, 0.18);
+        const moveDelta = group.userData.targetPos.clone().sub(group.position);
+        if (moveDelta.length() > 0.05) {
+          group.userData.targetRot = Math.atan2(-moveDelta.z, moveDelta.x);
+          const bankAngle = Math.min(0.28, moveDelta.length() * 0.16);
+          group.userData.targetBank = -bankAngle;
+        }
+
+        // If very large jump (teleport/reset), snap directly
+        if (group.position.distanceTo(group.userData.targetPos) > 18.0) {
+          group.position.copy(group.userData.targetPos);
+        }
+
+        // Floor filtering visibility
+        if (floorView !== 'ALL' && drone.floor && drone.floor !== parseInt(floorView, 10)) {
+          group.visible = false;
+        } else {
+          group.visible = true;
+        }
+
+        // Update badge sprite if role, floor, or battery changed
+        if (
+          group.userData.role !== drone.current_role ||
+          group.userData.floor !== floorLevel ||
+          Math.abs((group.userData.battery || 100) - (drone.battery || 100)) > 3
+        ) {
+          group.userData.role = drone.current_role;
+          group.userData.floor = floorLevel;
+          group.userData.battery = drone.battery || 98;
+          if (group.userData.badgeSprite) {
+            group.remove(group.userData.badgeSprite);
+            group.userData.badgeSprite.material.map.dispose();
+            group.userData.badgeSprite.material.dispose();
+          }
+          const newBadge = createDroneHudBadge(droneId, drone.current_role, colorHex, drone.battery || 98, floorLevel);
+          group.add(newBadge);
+          group.userData.badgeSprite = newBadge;
+        }
       }
 
       // Update Distinct Color Trajectory Trails
@@ -2728,57 +2809,150 @@ function buildStairwellWaveguide(parentGroup, numFloors, stairwellShaftRef) {
 }
 
 
-function createQuadcopterMesh(colorHex, idx, droneId, role) {
+function createDroneHudBadge(droneId, role, colorHex, battery = 98, floor = 1) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 340;
+  canvas.height = 95;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = 'rgba(10, 16, 29, 0.94)';
+  ctx.fillRect(0, 0, 340, 95);
+
+  ctx.strokeStyle = colorHex;
+  ctx.lineWidth = 4;
+  ctx.strokeRect(2, 2, 336, 91);
+
+  // Colored top banner
+  ctx.fillStyle = colorHex;
+  ctx.fillRect(0, 0, 340, 28);
+  ctx.fillStyle = '#0F172A';
+  ctx.font = 'bold 15px monospace';
+  const roleClean = (role || 'SEARCH').toUpperCase().replace('AND EXPLORATION', '').trim();
+  ctx.fillText(`🚁 ${droneId} • ${roleClean}`, 10, 20);
+
+  ctx.fillStyle = '#F8FAFC';
+  ctx.font = 'bold 13px monospace';
+  ctx.fillText(`FLOOR ${floor} • BATTERY ${Math.round(battery)}%`, 12, 54);
+
+  ctx.fillStyle = '#38BDF8';
+  ctx.font = '11px monospace';
+  ctx.fillText(`ACTIVE SWARM MESH TELEMETRY`, 12, 78);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(7.6, 2.1, 1.0);
+  sprite.position.set(0, 4.2, 0);
+  sprite.renderOrder = 999;
+  return sprite;
+}
+
+function createQuadcopterMesh(colorHex, idx, droneId, role, floor = 1, battery = 98) {
   const group = new THREE.Group();
 
-  // 1. High-Visibility Pulsing Colored Halo Ring
-  const haloGeo = new THREE.TorusGeometry(2.4, 0.14, 16, 32);
+  // 1. High-Visibility Pulsing Colored Halo Ring (Outer Radar Ring)
+  const haloGeo = new THREE.TorusGeometry(3.6, 0.22, 16, 32);
   const haloMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex),
     transparent: true,
-    opacity: 0.90
+    opacity: 0.85
   });
   const haloMesh = new THREE.Mesh(haloGeo, haloMat);
   haloMesh.rotation.x = Math.PI / 2;
   group.add(haloMesh);
 
-  // 2. Downward Active Sensor Scanning Light Cone
-  const scanConeGeo = new THREE.ConeGeometry(3.2, 5.0, 16, 1, true);
+  // 2. Vertical Tactical Locator Laser Beam Pillar
+  const beamHeight = 28.0;
+  const beamGeo = new THREE.CylinderGeometry(0.25, 0.25, beamHeight, 16);
+  const beamMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(colorHex),
+    transparent: true,
+    opacity: 0.38,
+    depthTest: false
+  });
+  const beamMesh = new THREE.Mesh(beamGeo, beamMat);
+  beamMesh.position.y = beamHeight / 2;
+  beamMesh.renderOrder = 995;
+  group.add(beamMesh);
+
+  // Ascending pulse ring on beacon pillar
+  const pulseGeo = new THREE.TorusGeometry(0.7, 0.12, 8, 24);
+  const pulseMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(colorHex),
+    transparent: true,
+    opacity: 0.85,
+    depthTest: false
+  });
+  const pulseRing = new THREE.Mesh(pulseGeo, pulseMat);
+  pulseRing.rotation.x = Math.PI / 2;
+  pulseRing.renderOrder = 996;
+  group.add(pulseRing);
+
+  // Top diamond locator marker
+  const diamondGeo = new THREE.OctahedronGeometry(0.85, 0);
+  const diamondMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex) });
+  const diamond = new THREE.Mesh(diamondGeo, diamondMat);
+  diamond.position.y = beamHeight;
+  diamond.renderOrder = 997;
+  group.add(diamond);
+
+  // 3. Downward Active Sensor Scanning Light Cone
+  const scanConeGeo = new THREE.ConeGeometry(4.2, 6.5, 16, 1, true);
   const scanConeMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex),
     transparent: true,
-    opacity: 0.16,
+    opacity: 0.22,
     side: THREE.DoubleSide,
     depthWrite: false
   });
   const scanCone = new THREE.Mesh(scanConeGeo, scanConeMat);
-  scanCone.position.y = -2.5;
+  scanCone.position.y = -3.2;
   group.add(scanCone);
 
-  // 3. Central Drone Carbon Fiber Fuselage
-  const bodyGeo = new THREE.SphereGeometry(1.1, 16, 12);
-  bodyGeo.scale(1.3, 0.45, 1.3);
+  // 4. Ground Scanning Ping Ring
+  const groundPingGeo = new THREE.RingGeometry(0.8, 3.8, 32);
+  const groundPingMat = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(colorHex),
+    transparent: true,
+    opacity: 0.55,
+    side: THREE.DoubleSide
+  });
+  const groundPing = new THREE.Mesh(groundPingGeo, groundPingMat);
+  groundPing.rotation.x = -Math.PI / 2;
+  groundPing.position.y = -5.0;
+  group.add(groundPing);
+
+  // 5. Central Drone Fuselage (Scaled & High Visibility)
+  const bodyGeo = new THREE.SphereGeometry(1.6, 16, 12);
+  bodyGeo.scale(1.25, 0.45, 1.25);
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x1E293B,
-    roughness: 0.3,
-    metalness: 0.8
+    color: 0x0F172A,
+    roughness: 0.25,
+    metalness: 0.85
   });
   const bodyMesh = new THREE.Mesh(bodyGeo, bodyMat);
   bodyMesh.castShadow = true;
   group.add(bodyMesh);
 
-  // 4. Glowing Colored Top Navigational Dome
-  const domeGeo = new THREE.SphereGeometry(0.65, 16, 12);
+  // Neon Body Rim
+  const rimGeo = new THREE.TorusGeometry(1.9, 0.1, 8, 32);
+  const rimMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex) });
+  const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+  rimMesh.rotation.x = Math.PI / 2;
+  group.add(rimMesh);
+
+  // 6. Glowing Colored Top Navigational Dome
+  const domeGeo = new THREE.SphereGeometry(0.85, 16, 12);
   const domeMat = new THREE.MeshBasicMaterial({
     color: new THREE.Color(colorHex)
   });
   const domeMesh = new THREE.Mesh(domeGeo, domeMat);
-  domeMesh.position.y = 0.35;
+  domeMesh.position.y = 0.45;
   group.add(domeMesh);
 
-  // 5. X-Frame Quadcopter Arms
-  const armMat = new THREE.MeshStandardMaterial({ color: 0x0F172A, roughness: 0.4 });
-  const armGeo = new THREE.CylinderGeometry(0.12, 0.12, 4.4, 8);
+  // 7. X-Frame Quadcopter Arms
+  const armMat = new THREE.MeshStandardMaterial({ color: 0x1E293B, roughness: 0.3 });
+  const armGeo = new THREE.CylinderGeometry(0.18, 0.18, 5.6, 8);
   const arm1 = new THREE.Mesh(armGeo, armMat);
   arm1.rotation.z = Math.PI / 2;
   arm1.rotation.y = Math.PI / 4;
@@ -2789,12 +2963,12 @@ function createQuadcopterMesh(colorHex, idx, droneId, role) {
   arm2.rotation.y = -Math.PI / 4;
   group.add(arm2);
 
-  // 6. 4 Rotor Guards & Spinning Propeller Blades
-  const ringGeo = new THREE.TorusGeometry(1.0, 0.08, 8, 24);
+  // 8. 4 Rotor Guards & Spinning Propeller Blades
+  const ringGeo = new THREE.TorusGeometry(1.4, 0.10, 8, 24);
   const ringMat = new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex) });
 
   const rotorBlades = [];
-  const armDist = 1.55;
+  const armDist = 2.0;
   const rotorPositions = [
     [armDist, armDist],
     [-armDist, armDist],
@@ -2805,41 +2979,34 @@ function createQuadcopterMesh(colorHex, idx, droneId, role) {
   rotorPositions.forEach(([rx, rz]) => {
     const ring = new THREE.Mesh(ringGeo, ringMat);
     ring.rotation.x = Math.PI / 2;
-    ring.position.set(rx, 0.1, rz);
+    ring.position.set(rx, 0.15, rz);
     group.add(ring);
 
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.28, 8), bodyMat);
-    hub.position.set(rx, 0.12, rz);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.35, 8), bodyMat);
+    hub.position.set(rx, 0.2, rz);
     group.add(hub);
 
-    const bladeGeo = new THREE.BoxGeometry(1.8, 0.04, 0.2);
+    const bladeGeo = new THREE.BoxGeometry(2.4, 0.05, 0.28);
     const bladeMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
     const blade = new THREE.Mesh(bladeGeo, bladeMat);
     hub.add(blade);
     rotorBlades.push(hub);
   });
 
-  // 7. Compact Floating 3D Tag Billboard
-  const tagCanvas = document.createElement('canvas');
-  tagCanvas.width = 240;
-  tagCanvas.height = 60;
-  const tagCtx = tagCanvas.getContext('2d');
-  tagCtx.fillStyle = 'rgba(15, 23, 42, 0.90)';
-  tagCtx.fillRect(0, 0, 240, 60);
-  tagCtx.strokeStyle = colorHex;
-  tagCtx.lineWidth = 3;
-  tagCtx.strokeRect(2, 2, 236, 56);
-  tagCtx.fillStyle = colorHex;
-  tagCtx.font = 'bold 22px monospace';
-  tagCtx.fillText(droneId || `UAV-${idx + 1}`, 12, 38);
+  // 9. Floating 3D Tactical UAV HUD Billboard
+  const badgeSprite = createDroneHudBadge(droneId, role, colorHex, battery, floor);
+  group.add(badgeSprite);
 
-  const tagTex = new THREE.CanvasTexture(tagCanvas);
-  const tagSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tagTex, transparent: true }));
-  tagSprite.scale.set(4.0, 1.0, 1.0);
-  tagSprite.position.set(0, 2.4, 0);
-  group.add(tagSprite);
+  group.userData = {
+    rotors: rotorBlades,
+    halo: haloMesh,
+    pulseRing,
+    groundPing,
+    diamond,
+    badgeSprite,
+    beamMesh
+  };
 
-  group.userData = { rotors: rotorBlades, halo: haloMesh };
   return group;
 }
 

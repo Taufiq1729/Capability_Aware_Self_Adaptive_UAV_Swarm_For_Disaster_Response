@@ -32,7 +32,7 @@ class UAVAgent:
         self.target_x = init_x + random.uniform(-40, 40)
         self.target_y = init_y + random.uniform(-40, 40)
         self.target_z = self.z
-        self.speed = 3.6
+        self.speed = 16.0
         
         self.initial_role = initial_role
         self.current_role = initial_role
@@ -92,9 +92,9 @@ class UAVAgent:
         
         # If in Relay mode, drone maintains low-speed eco hover at mesh relay position
         if self.current_role == "Communication relay":
-            effective_speed = max(0.5, 1.8 * c_mob) # Eco hover loiter speed
+            effective_speed = max(1.2, 4.0 * c_mob) # Eco hover loiter speed
         else:
-            effective_speed = max(0.4, self.speed * c_mob)
+            effective_speed = max(2.5, self.speed * c_mob)
 
         dx = self.target_x - self.x
         dy = self.target_y - self.y
