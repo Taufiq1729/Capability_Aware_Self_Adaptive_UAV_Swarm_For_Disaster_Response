@@ -21,7 +21,10 @@ import {
   Building,
   Users,
   Award,
-  ChevronDown
+  ChevronDown,
+  Heart,
+  Package,
+  ShieldAlert
 } from 'lucide-react';
 
 class SimErrorBoundary extends React.Component {
@@ -117,6 +120,17 @@ export const LiveSimulationPage = () => {
   const drones = simState?.drones || [];
   const env = simState?.environment;
   const numFloors = env?.num_floors || 3;
+
+  const rawVictims = simState?.environment?.victims || [
+    { id: 'victim_1', name: 'Trapped Resident in Living Room', floor: 1, triage_tag: 'RED', vital_temp_c: 37.6, pulse_bpm: 98, urgency: 0.94, payload_status: 'DELIVERED', payload_delivered_by: 'UAV-Beta' },
+    { id: 'victim_2', name: 'Resident behind Kitchen Cabinets', floor: 1, triage_tag: 'YELLOW', vital_temp_c: 37.0, pulse_bpm: 82, urgency: 0.84, payload_status: 'PENDING' },
+    { id: 'victim_3', name: 'Resident in Garage Rubble', floor: 1, triage_tag: 'GREEN', vital_temp_c: 36.8, pulse_bpm: 76, urgency: 0.72, payload_status: 'PENDING' },
+    { id: 'victim_4', name: 'Resident in 2F Master Bed Rubble', floor: 2, triage_tag: 'RED', vital_temp_c: 38.1, pulse_bpm: 104, urgency: 0.96, payload_status: 'DELIVERED', payload_delivered_by: 'UAV-Gamma' }
+  ];
+
+  const stairwellRelayDrone = drones.find((d) =>
+    (d.current_role === 'Communication relay' || d.currentRole === 'Communication relay')
+  );
 
   const onDustChange = async (e) => {
     const val = parseFloat(e.target.value);
@@ -867,6 +881,126 @@ export const LiveSimulationPage = () => {
                   Clear
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* START Casualty Triage & Emergency Medical Payload Card */}
+          <div className="bg-slate-900/80 backdrop-blur-xl border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <Heart className="w-4 h-4 text-red-400" />
+                <h3 className="text-sm font-bold font-mono text-slate-100 uppercase tracking-wider">
+                  START Casualty Triage & Payloads
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-red-950/80 text-red-300 border border-red-500/30">
+                Simple Triage & Rapid Treatment
+              </span>
+            </div>
+
+            {/* Quick Metrics Tally */}
+            <div className="grid grid-cols-4 gap-2 text-center font-mono">
+              <div className="bg-red-950/40 border border-red-500/30 rounded-xl p-2">
+                <span className="text-[9px] text-red-400 font-bold block">IMMEDIATE</span>
+                <span className="text-base font-extrabold text-red-200">
+                  {rawVictims.filter((v) => v.triage_tag === 'RED').length}
+                </span>
+                <span className="text-[9px] text-slate-400 block">🔴 Red</span>
+              </div>
+              <div className="bg-amber-950/40 border border-amber-500/30 rounded-xl p-2">
+                <span className="text-[9px] text-amber-400 font-bold block">DELAYED</span>
+                <span className="text-base font-extrabold text-amber-200">
+                  {rawVictims.filter((v) => v.triage_tag === 'YELLOW').length}
+                </span>
+                <span className="text-[9px] text-slate-400 block">🟡 Yellow</span>
+              </div>
+              <div className="bg-emerald-950/40 border border-emerald-500/30 rounded-xl p-2">
+                <span className="text-[9px] text-emerald-400 font-bold block">MINOR</span>
+                <span className="text-base font-extrabold text-emerald-200">
+                  {rawVictims.filter((v) => v.triage_tag === 'GREEN').length}
+                </span>
+                <span className="text-[9px] text-slate-400 block">🟢 Green</span>
+              </div>
+              <div className="bg-cyan-950/40 border border-cyan-500/30 rounded-xl p-2">
+                <span className="text-[9px] text-cyan-400 font-bold block">BEACONS</span>
+                <span className="text-base font-extrabold text-cyan-200">
+                  {rawVictims.filter((v) => v.payload_status === 'DELIVERED').length}
+                </span>
+                <span className="text-[9px] text-slate-400 block">📦 Drops</span>
+              </div>
+            </div>
+
+            {/* Stairwell Multi-Floor Waveguide Mesh Self-Healing Status */}
+            <div className="p-2.5 rounded-xl border border-cyan-500/30 bg-cyan-950/30 text-xs font-mono space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-cyan-300 font-bold flex items-center space-x-1.5">
+                  <Radio className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                  <span>Stairwell Waveguide Relay:</span>
+                </span>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-900/60 text-cyan-200 font-bold">
+                  {stairwellRelayDrone ? 'ANCHORED (LOS)' : 'MONITORING'}
+                </span>
+              </div>
+              <p className="text-[10.5px] text-slate-300 font-sans leading-tight">
+                {stairwellRelayDrone
+                  ? `${stairwellRelayDrone.drone_id} maintaining vertical line-of-sight RF waveguide shaft (${stairwellRelayDrone.floor || 2}F). Concrete slab attenuation bypassed.`
+                  : 'Swarm monitors floor connectivity. Relay drones auto-dispatch to the central stairwell atrium upon inter-floor partition.'}
+              </p>
+            </div>
+
+            {/* Survivor Triage & Emergency Drops List */}
+            <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1">
+              {rawVictims.map((v, idx) => {
+                const isRed = v.triage_tag === 'RED';
+                const isYellow = v.triage_tag === 'YELLOW';
+                const isDelivered = v.payload_status === 'DELIVERED';
+
+                return (
+                  <div
+                    key={v.id || idx}
+                    className="p-2.5 rounded-xl bg-slate-950/60 border border-slate-800 text-xs font-mono space-y-1.5"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-200 flex items-center space-x-1.5">
+                        <span className={`w-2 h-2 rounded-full ${isRed ? 'bg-red-400' : isYellow ? 'bg-amber-400' : 'bg-emerald-400'}`} />
+                        <span>{v.name || `Casualty #${v.id}`}</span>
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[9.5px] font-bold ${
+                          isRed
+                            ? 'bg-red-950 text-red-300 border border-red-500/40'
+                            : isYellow
+                            ? 'bg-amber-950 text-amber-300 border border-amber-500/40'
+                            : 'bg-emerald-950 text-emerald-300 border border-emerald-500/40'
+                        }`}
+                      >
+                        {v.triage_tag || 'DELAYED'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10.5px] text-slate-400">
+                      <span>Floor {v.floor || 1} • {v.vital_temp_c || 37.0}°C • {v.pulse_bpm || 80} BPM</span>
+                      <span className="text-slate-500">Urgency: {(v.urgency ?? 0.85).toFixed(2)}</span>
+                    </div>
+
+                    <div className="pt-0.5 text-[10.5px]">
+                      {isDelivered ? (
+                        <span className="text-emerald-400 font-bold flex items-center space-x-1">
+                          <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                          <span>First-Aid RF Beacon Deployed by {v.payload_delivered_by || 'UAV'}</span>
+                        </span>
+                      ) : isRed || isYellow ? (
+                        <span className="text-amber-400/90 flex items-center space-x-1">
+                          <span className="animate-pulse">⏳</span>
+                          <span>Medical payload kit dispatch queued</span>
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">Stable • Ambulatory evacuation</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

@@ -362,6 +362,7 @@ export const ThreeBuildingSimulation = ({
   const victimObjectsRef = useRef({});
   const dustParticlesRef = useRef(null);
   const animFrameRef = useRef(null);
+  const stairwellShaftRef = useRef(null);
   const timeRef = useRef(0);
   const targetLerpRef = useRef({ active: false, target: new THREE.Vector3(), camPos: new THREE.Vector3() });
 
@@ -716,15 +717,41 @@ export const ThreeBuildingSimulation = ({
         dustParticlesRef.current.geometry.attributes.position.needsUpdate = true;
       }
 
-      // Animate victims
+      // Animate victims & Emergency Beacon Kits
       const victimDict = victimObjectsRef.current;
       Object.keys(victimDict).forEach((vId) => {
         const vItem = victimDict[vId];
         if (vItem) {
           const pulse = 1.0 + Math.sin(t * 3.5 + Number(vId.replace(/\D/g, ''))) * 0.16;
           if (vItem.heatRing) vItem.heatRing.scale.set(pulse, pulse, pulse);
+
+          // Animate Emergency First-Aid Radio Beacon Kit
+          if (vItem.beaconKit) {
+            const led = vItem.beaconKit.getObjectByName('beaconLed');
+            const ping = vItem.beaconKit.getObjectByName('beaconPing');
+            if (led && led.material) {
+              const strobe = Math.sin(t * 8.0) > 0 ? 1.0 : 0.25;
+              led.material.opacity = strobe;
+            }
+            if (ping && ping.material) {
+              const pingScale = 1.0 + ((t * 1.8) % 2.0);
+              ping.scale.set(pingScale, pingScale, 1.0);
+              ping.material.opacity = Math.max(0, 0.7 - (pingScale - 1.0) * 0.45);
+            }
+          }
         }
       });
+
+      // Animate Vertical Stairwell RF Waveguide Shaft
+      if (stairwellShaftRef.current && stairwellShaftRef.current.userData) {
+        const pulseRing = stairwellShaftRef.current.userData.pulseRing;
+        const totalHeight = stairwellShaftRef.current.userData.totalHeight || 25;
+        if (pulseRing && pulseRing.material) {
+          const progress = (t * 0.45) % 1.0;
+          pulseRing.position.y = progress * totalHeight;
+          pulseRing.material.opacity = 0.85 * (1.0 - Math.abs(progress - 0.5) * 1.8);
+        }
+      }
 
       // Animate drone quadcopters
       const droneMeshes = droneMeshesRef.current;
@@ -859,6 +886,9 @@ export const ThreeBuildingSimulation = ({
       build3FloorClinic(root, mats, floorGroupsRef);
     }
 
+    // Build Central Vertical Stairwell RF Waveguide Shaft (Line-of-Sight propagation anchor)
+    buildStairwellWaveguide(root, activeMeta.numFloors, stairwellShaftRef);
+
     // Reset floor view to ALL
     setFloorView('ALL');
 
@@ -937,9 +967,12 @@ export const ThreeBuildingSimulation = ({
         heatRing.position.y = -1.1;
         group.add(heatRing);
 
+        const triageColor = v.triage_tag === 'RED' ? 0xEF4444 : v.triage_tag === 'YELLOW' ? 0xF59E0B : 0x10B981;
+        const initialColor = isDetected ? triageColor : 0xEF4444;
+
         const coreGeo = new THREE.SphereGeometry(0.75, 16, 16);
         const coreMat = new THREE.MeshBasicMaterial({
-          color: isDetected ? 0x10B981 : 0xEF4444
+          color: initialColor
         });
         const coreSphere = new THREE.Mesh(coreGeo, coreMat);
         coreSphere.position.set(0, 0.4, 0);
@@ -949,6 +982,14 @@ export const ThreeBuildingSimulation = ({
         hudBadge.position.set(0, 4.6, 0);
         group.add(hudBadge);
 
+        // Emergency First-Aid Radio Beacon Kit
+        let beaconKit = null;
+        if (v.payload_status === 'DELIVERED') {
+          beaconKit = createBeaconKitMesh();
+          beaconKit.position.set(1.4, -0.4, 0.6);
+          group.add(beaconKit);
+        }
+
         scene.add(group);
 
         vItem = {
@@ -957,8 +998,11 @@ export const ThreeBuildingSimulation = ({
           heatRing,
           coreSphere,
           hudBadge,
+          beaconKit,
           isDetected,
           detectedBy: v.detected_by,
+          triageTag: v.triage_tag,
+          payloadStatus: v.payload_status,
           data: v
         };
         victimDict[vId] = vItem;
@@ -966,11 +1010,20 @@ export const ThreeBuildingSimulation = ({
         // Update position in case victim's floor or coordinates updated
         vItem.group.position.set(worldX, worldY, worldZ);
 
-        if (vItem.isDetected !== isDetected || vItem.detectedBy !== v.detected_by) {
+        const stateChanged = (
+          vItem.isDetected !== isDetected ||
+          vItem.detectedBy !== v.detected_by ||
+          vItem.triageTag !== v.triage_tag ||
+          vItem.payloadStatus !== v.payload_status
+        );
+
+        if (stateChanged) {
           vItem.isDetected = isDetected;
           vItem.detectedBy = v.detected_by;
+          vItem.triageTag = v.triage_tag;
+          vItem.payloadStatus = v.payload_status;
 
-          const targetColor = isDetected ? 0x10B981 : 0xEF4444;
+          const targetColor = v.triage_tag === 'RED' ? 0xEF4444 : v.triage_tag === 'YELLOW' ? 0xF59E0B : 0x10B981;
           vItem.heatRing.material.color.setHex(targetColor);
           vItem.coreSphere.material.color.setHex(targetColor);
 
@@ -982,6 +1035,17 @@ export const ThreeBuildingSimulation = ({
           newBadge.position.set(0, 4.6, 0);
           vItem.group.add(newBadge);
           vItem.hudBadge = newBadge;
+
+          // Sync Emergency First-Aid Radio Beacon Kit mesh
+          if (v.payload_status === 'DELIVERED' && !vItem.beaconKit) {
+            const kit = createBeaconKitMesh();
+            kit.position.set(1.4, -0.4, 0.6);
+            vItem.group.add(kit);
+            vItem.beaconKit = kit;
+          } else if (v.payload_status !== 'DELIVERED' && vItem.beaconKit) {
+            vItem.group.remove(vItem.beaconKit);
+            vItem.beaconKit = null;
+          }
         }
       }
     });
@@ -1097,8 +1161,10 @@ export const ThreeBuildingSimulation = ({
     simState?.environment?.victims?.length ||
     (activeComplexity === 'HIGH' ? 10 : activeComplexity === 'LOW' ? 6 : 7);
 
+  const rawVictims = simState?.environment?.victims || [];
   const detectedVictimsCount = simState?.victims_detected || 0;
   const rescuePercent = Math.min(100, Math.round((detectedVictimsCount / (totalVictimsCount || 1)) * 100));
+  const deliveredPayloadsCount = rawVictims.filter((v) => v.payload_status === 'DELIVERED').length;
 
   return (
     <div className="relative border border-cyan-500/40 rounded-2xl overflow-hidden bg-[#0A101D] shadow-[0_0_35px_rgba(6,182,212,0.2)] flex flex-col">
@@ -1119,14 +1185,28 @@ export const ThreeBuildingSimulation = ({
             </span>
           </div>
 
-          <div className="bg-slate-950/85 backdrop-blur-md border border-slate-800 px-3 py-1 rounded-xl text-[10px] font-mono text-slate-200 flex items-center space-x-2">
+          <div className="bg-slate-950/85 backdrop-blur-md border border-slate-800 px-3 py-1 rounded-xl text-[10px] font-mono text-slate-200 flex flex-wrap items-center space-x-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
             <span className="font-bold text-white">
-              VICTIMS IDENTIFIED: {detectedVictimsCount} / {totalVictimsCount}
+              VICTIMS: {detectedVictimsCount} / {totalVictimsCount}
             </span>
             <span className="text-slate-500">|</span>
             <span className="text-emerald-400 font-bold">
-              {rescuePercent}% RESCUED
+              {rescuePercent}% LOCATED
+            </span>
+            {deliveredPayloadsCount > 0 && (
+              <>
+                <span className="text-slate-500">|</span>
+                <span className="text-amber-400 font-bold flex items-center space-x-1">
+                  <span>📦</span>
+                  <span>{deliveredPayloadsCount} BEACONS DROPPED</span>
+                </span>
+              </>
+            )}
+            <span className="text-slate-500">|</span>
+            <span className="text-cyan-400 font-bold flex items-center space-x-1" title="Central Stairwell Line-of-Sight RF Waveguide Active">
+              <span>📶</span>
+              <span>STAIRWELL LOS ACTIVE</span>
             </span>
           </div>
         </div>
@@ -2413,50 +2493,240 @@ function createCrackedPit(parent, x, y, z, radius) {
 
 function createTriageBadgeMesh(victim, isDetected) {
   const canvas = document.createElement('canvas');
-  canvas.width = 360;
-  canvas.height = 130;
+  canvas.width = 380;
+  canvas.height = 145;
   const ctx = canvas.getContext('2d');
 
-  const themeColor = isDetected ? '#10B981' : '#EF4444';
-  const headerBg = isDetected ? 'rgba(16, 185, 129, 0.95)' : 'rgba(239, 68, 68, 0.95)';
-  const headerText = isDetected
-    ? `✓ RESCUED BY ${victim.detected_by || 'UAV'}`
-    : '🚨 SOS: UNLOCATED CASUALTY';
-  const statusText = isDetected
-    ? 'TRIAGED • VITALS STABLE • SECURED'
-    : 'CRITICAL • AWAITING DRONE DETECTION';
+  const triageTag = (victim.triage_tag || (isDetected ? 'YELLOW' : 'RED')).toUpperCase();
+  const isRed = triageTag === 'RED';
+  const isYellow = triageTag === 'YELLOW';
 
-  ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
-  ctx.fillRect(0, 0, 360, 130);
+  const themeColor = isRed ? '#EF4444' : isYellow ? '#F59E0B' : '#10B981';
+  const headerBg = isRed
+    ? 'rgba(239, 68, 68, 0.95)'
+    : isYellow
+    ? 'rgba(245, 158, 11, 0.95)'
+    : 'rgba(16, 185, 129, 0.95)';
+
+  const tagLabel = isRed ? '🔴 START: RED (IMMEDIATE)' : isYellow ? '🟡 START: YELLOW (DELAYED)' : '🟢 START: GREEN (MINOR)';
+  const headerText = isDetected
+    ? `${tagLabel} • RESCUED`
+    : `${tagLabel} • UNLOCATED`;
+
+  ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+  ctx.fillRect(0, 0, 380, 145);
 
   ctx.strokeStyle = themeColor;
   ctx.lineWidth = 4;
-  ctx.strokeRect(2, 2, 356, 126);
+  ctx.strokeRect(2, 2, 376, 141);
 
   ctx.fillStyle = headerBg;
-  ctx.fillRect(0, 0, 360, 32);
+  ctx.fillRect(0, 0, 380, 34);
   ctx.fillStyle = '#FFFFFF';
-  ctx.font = 'bold 15px monospace';
-  ctx.fillText(headerText, 12, 22);
+  ctx.font = 'bold 14px monospace';
+  ctx.fillText(headerText, 12, 23);
 
   ctx.fillStyle = '#F8FAFC';
   ctx.font = 'bold 13.5px monospace';
-  ctx.fillText(victim.name || `Human Casualty #${victim.id}`, 14, 58);
+  ctx.fillText(victim.name || `Human Casualty #${victim.id}`, 14, 60);
 
   ctx.fillStyle = '#38BDF8';
   ctx.font = '12px monospace';
-  ctx.fillText(`Temp: ${victim.vital_temp_c || 37.0}°C • HR: ${victim.pulse_bpm || 80} BPM`, 14, 82);
+  ctx.fillText(
+    `Temp: ${victim.vital_temp_c || 37.0}°C • HR: ${victim.pulse_bpm || 80} BPM • Urgency: ${(victim.urgency ?? 0.85).toFixed(2)}`,
+    14,
+    86
+  );
 
-  ctx.fillStyle = isDetected ? '#34D399' : '#F87171';
-  ctx.font = 'bold 11.5px monospace';
-  ctx.fillText(statusText, 14, 108);
+  // START Triage Priority & Payload delivery status
+  const payloadDelivered = victim.payload_status === 'DELIVERED';
+  if (payloadDelivered) {
+    ctx.fillStyle = '#34D399';
+    ctx.font = 'bold 12px monospace';
+    ctx.fillText(`📦 BEACON & AID KIT: DELIVERED BY ${victim.payload_delivered_by || 'UAV'}`, 14, 114);
+  } else if (isRed || isYellow) {
+    ctx.fillStyle = '#FBBF24';
+    ctx.font = 'bold 11.5px monospace';
+    ctx.fillText(`⏳ EMERGENCY PAYLOAD: DISPATCH IN PROGRESS`, 14, 114);
+  } else {
+    ctx.fillStyle = '#94A3B8';
+    ctx.font = 'bold 11.5px monospace';
+    ctx.fillText(`✓ CASUALTY STABLE • AWAITING EVACUATION`, 14, 114);
+  }
+
+  // Triage description sub-bar
+  ctx.fillStyle = '#94A3B8';
+  ctx.font = '10px monospace';
+  ctx.fillText(
+    victim.triage_desc ||
+      (isRed
+        ? 'Immediate life-threat: triage critical priority'
+        : isYellow
+        ? 'Urgent attention required: trapped status'
+        : 'Minor ambulatory condition: stable'),
+    14,
+    134
+  );
 
   const texture = new THREE.CanvasTexture(canvas);
   const spriteMat = new THREE.SpriteMaterial({ map: texture, transparent: true });
   const sprite = new THREE.Sprite(spriteMat);
-  sprite.scale.set(7.5, 2.7, 1);
+  sprite.scale.set(7.8, 3.0, 1);
   return sprite;
 }
+
+/**
+ * 3D Emergency First-Aid Radio Beacon Kit
+ * Deployed automatically beside RED / YELLOW casualties by UAV
+ */
+function createBeaconKitMesh() {
+  const kitGroup = new THREE.Group();
+  kitGroup.name = 'beaconKit';
+
+  // 1. Waterproof Pelican-style First-Aid Case (Tactical Red Box)
+  const caseGeo = new THREE.BoxGeometry(1.6, 0.7, 1.2);
+  const caseMat = new THREE.MeshStandardMaterial({
+    color: 0xEF4444,
+    roughness: 0.35,
+    metalness: 0.25
+  });
+  const caseMesh = new THREE.Mesh(caseGeo, caseMat);
+  caseMesh.castShadow = true;
+  kitGroup.add(caseMesh);
+
+  // 2. White First-Aid Cross markings on top
+  const crossVGeo = new THREE.BoxGeometry(0.24, 0.05, 0.7);
+  const crossHGeo = new THREE.BoxGeometry(0.7, 0.05, 0.24);
+  const crossMat = new THREE.MeshBasicMaterial({ color: 0xFFFFFF });
+  const crossV = new THREE.Mesh(crossVGeo, crossMat);
+  crossV.position.y = 0.36;
+  const crossH = new THREE.Mesh(crossHGeo, crossMat);
+  crossH.position.y = 0.36;
+  kitGroup.add(crossV);
+  kitGroup.add(crossH);
+
+  // 3. Tactical RF Whip Antenna
+  const antGeo = new THREE.CylinderGeometry(0.04, 0.04, 1.8, 8);
+  const antMat = new THREE.MeshBasicMaterial({ color: 0x1E293B });
+  const antenna = new THREE.Mesh(antGeo, antMat);
+  antenna.position.set(0.65, 0.9, -0.45);
+  antenna.rotation.z = -0.15;
+  kitGroup.add(antenna);
+
+  // 4. Strobe Beacon LED at top of antenna
+  const ledGeo = new THREE.SphereGeometry(0.2, 12, 12);
+  const ledMat = new THREE.MeshBasicMaterial({
+    color: 0x00FF88,
+    transparent: true,
+    opacity: 0.9
+  });
+  const ledMesh = new THREE.Mesh(ledGeo, ledMat);
+  ledMesh.name = 'beaconLed';
+  ledMesh.position.set(0.78, 1.8, -0.45);
+  kitGroup.add(ledMesh);
+
+  // 5. RF Wave Ping Ring expanding on floor
+  const pingGeo = new THREE.RingGeometry(0.4, 2.2, 24);
+  const pingMat = new THREE.MeshBasicMaterial({
+    color: 0x10B981,
+    transparent: true,
+    opacity: 0.6,
+    side: THREE.DoubleSide
+  });
+  const pingRing = new THREE.Mesh(pingGeo, pingMat);
+  pingRing.name = 'beaconPing';
+  pingRing.rotation.x = -Math.PI / 2;
+  pingRing.position.y = -0.3;
+  kitGroup.add(pingRing);
+
+  return kitGroup;
+}
+
+/**
+ * Vertical Stairwell RF Waveguide Shaft
+ * Central line-of-sight propagation corridor across all building floors
+ */
+function buildStairwellWaveguide(parentGroup, numFloors, stairwellShaftRef) {
+  const shaftGroup = new THREE.Group();
+  shaftGroup.name = 'stairwellWaveguide';
+
+  const totalHeight = numFloors * 11.2;
+  const shaftRadius = 6.2;
+  const stairwellX = -0.8;
+  const stairwellZ = 0.8;
+
+  // 1. Translucent Holographic Waveguide Cylinder
+  const cylGeo = new THREE.CylinderGeometry(shaftRadius, shaftRadius, totalHeight, 24, numFloors, true);
+  const cylMat = new THREE.MeshBasicMaterial({
+    color: 0x00F0FF,
+    wireframe: true,
+    transparent: true,
+    opacity: 0.22
+  });
+  const cylMesh = new THREE.Mesh(cylGeo, cylMat);
+  cylMesh.position.set(stairwellX, totalHeight / 2, stairwellZ);
+  shaftGroup.add(cylMesh);
+
+  // 2. Soft inner volumetric RF glow cylinder
+  const innerGeo = new THREE.CylinderGeometry(shaftRadius * 0.95, shaftRadius * 0.95, totalHeight, 16, 1, true);
+  const innerMat = new THREE.MeshBasicMaterial({
+    color: 0x0284C7,
+    transparent: true,
+    opacity: 0.06,
+    side: THREE.DoubleSide
+  });
+  const innerMesh = new THREE.Mesh(innerGeo, innerMat);
+  innerMesh.position.set(stairwellX, totalHeight / 2, stairwellZ);
+  shaftGroup.add(innerMesh);
+
+  // 3. Ring guidelines at each floor slab boundary
+  for (let f = 1; f <= numFloors + 1; f++) {
+    const ringY = (f - 1) * 11.2;
+    const ringGeo = new THREE.RingGeometry(shaftRadius - 0.2, shaftRadius + 0.3, 32);
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: 0x38BDF8,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide
+    });
+    const ring = new THREE.Mesh(ringGeo, ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(stairwellX, ringY, stairwellZ);
+    shaftGroup.add(ring);
+  }
+
+  // 4. Traveling RF Pulse Beam Ring
+  const pulseGeo = new THREE.TorusGeometry(shaftRadius - 0.1, 0.25, 12, 32);
+  const pulseMat = new THREE.MeshBasicMaterial({
+    color: 0x00F0FF,
+    transparent: true,
+    opacity: 0.85
+  });
+  const pulseRing = new THREE.Mesh(pulseGeo, pulseMat);
+  pulseRing.rotation.x = Math.PI / 2;
+  pulseRing.position.set(stairwellX, 0, stairwellZ);
+  shaftGroup.add(pulseRing);
+
+  // 5. 3D Holographic Label at top of shaft
+  create3DRoomBadge(
+    shaftGroup,
+    '📶 CENTRAL STAIRWELL RF WAVEGUIDE SHAFT (LOS)',
+    stairwellX,
+    totalHeight + 2.5,
+    stairwellZ
+  );
+
+  shaftGroup.userData = {
+    totalHeight,
+    pulseRing
+  };
+
+  parentGroup.add(shaftGroup);
+  if (stairwellShaftRef) {
+    stairwellShaftRef.current = shaftGroup;
+  }
+}
+
 
 function createQuadcopterMesh(colorHex, idx, droneId, role) {
   const group = new THREE.Group();

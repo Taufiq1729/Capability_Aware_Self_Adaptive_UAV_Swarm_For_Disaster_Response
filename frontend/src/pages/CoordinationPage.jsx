@@ -965,10 +965,20 @@ export const CoordinationPage = () => {
                   ZONE 2 • UPPER FLOORS (ROOMS 201-204 & RELAY CORRIDOR)
                 </text>
 
-                {/* Floor Boundary / RF Attenuation Line */}
-                <line x1="20" y1="220" x2="780" y2="220" stroke="#334155" strokeWidth="1.5" strokeDasharray="6 6" />
-                <text x="400" y="216" fill="#64748B" fontSize="9" fontFamily="monospace" textAnchor="middle">
-                  INTER-FLOOR RF ATTENUATION BOUNDARY
+                {/* Floor Boundary / Concrete Slab RF Attenuation Line */}
+                <line x1="20" y1="220" x2="780" y2="220" stroke="#334155" strokeWidth="2" strokeDasharray="6 6" />
+                <text x="180" y="216" fill="#64748B" fontSize="9" fontFamily="monospace" textAnchor="middle">
+                  CONCRETE SLAB ATTENUATION (-20 dB)
+                </text>
+                <text x="620" y="216" fill="#64748B" fontSize="9" fontFamily="monospace" textAnchor="middle">
+                  INTER-FLOOR RF PARTITION
+                </text>
+
+                {/* Central Stairwell Waveguide Shaft Opening */}
+                <rect x="315" y="204" width="150" height="32" rx="8" fill="#0369A1" fillOpacity="0.25" stroke="#38BDF8" strokeWidth="1.5" strokeDasharray="3 3" />
+                <circle cx="390" cy="220" r="14" fill="#0284C7" fillOpacity="0.4" stroke="#00F0FF" strokeWidth="1" />
+                <text x="390" y="223" fill="#38BDF8" fontSize="8.5" fontFamily="monospace" fontWeight="bold" textAnchor="middle">
+                  📶 STAIRWELL RF SHAFT
                 </text>
 
                 {/* P2P Edges (Wireless Links) */}
@@ -977,9 +987,20 @@ export const CoordinationPage = () => {
                   const nodeB = nodes.find((n) => n.id === edge.target);
                   if (!nodeA || !nodeB) return null;
 
+                  const isDifferentFloor = Boolean(nodeA.floor && nodeB.floor && nodeA.floor !== nodeB.floor);
+                  const isStairwellBridge = Boolean(edge.is_stairwell_bridge || (isDifferentFloor && Math.abs(nodeA.x - 390) < 140 && Math.abs(nodeB.x - 390) < 140));
+
                   const midX = (nodeA.x + nodeB.x) / 2;
                   const midY = (nodeA.y + nodeB.y) / 2;
                   const lossPct = Math.round((edge.loss_prob || 0.03) * 100);
+
+                  const strokeColor = isStairwellBridge
+                    ? '#00F0FF'
+                    : isDifferentFloor
+                    ? '#F59E0B'
+                    : 'url(#linkGradient)';
+
+                  const strokeWidth = isStairwellBridge ? 3.5 : Math.max(1.5, 3.5 - edge.distance / 150);
 
                   return (
                     <g key={`edge-${eIdx}`}>
@@ -988,31 +1009,33 @@ export const CoordinationPage = () => {
                         y1={nodeA.y}
                         x2={nodeB.x}
                         y2={nodeB.y}
-                        stroke="url(#linkGradient)"
-                        strokeWidth={Math.max(1.5, 3.5 - edge.distance / 150)}
-                        strokeDasharray={edge.loss_prob > 0.15 ? '4 4' : undefined}
-                        opacity={Math.max(0.35, 1.0 - edge.loss_prob)}
+                        stroke={strokeColor}
+                        strokeWidth={strokeWidth}
+                        strokeDasharray={isStairwellBridge ? undefined : (edge.loss_prob > 0.15 ? '4 4' : undefined)}
+                        opacity={isStairwellBridge ? 0.95 : Math.max(0.35, 1.0 - edge.loss_prob)}
+                        filter={isStairwellBridge ? 'url(#glow)' : undefined}
                       />
                       {/* Midpoint link telemetry tag */}
                       <rect
-                        x={midX - 22}
-                        y={midY - 8}
-                        width="44"
-                        height="16"
-                        rx="4"
+                        x={midX - (isStairwellBridge ? 52 : 24)}
+                        y={midY - 9}
+                        width={isStairwellBridge ? 104 : 48}
+                        height="18"
+                        rx="5"
                         fill="#0A101D"
-                        stroke="#1E293B"
-                        strokeWidth="1"
+                        stroke={isStairwellBridge ? '#00F0FF' : '#1E293B'}
+                        strokeWidth={isStairwellBridge ? 1.5 : 1}
                       />
                       <text
                         x={midX}
-                        y={midY + 3}
-                        fill="#94A3B8"
-                        fontSize="9"
+                        y={midY + 3.5}
+                        fill={isStairwellBridge ? '#38BDF8' : '#94A3B8'}
+                        fontSize={isStairwellBridge ? '8.5' : '9'}
                         fontFamily="monospace"
+                        fontWeight={isStairwellBridge ? 'bold' : 'normal'}
                         textAnchor="middle"
                       >
-                        {lossPct}% loss
+                        {isStairwellBridge ? `⚡ SHAFT BRIDGE (${lossPct}%)` : `${lossPct}% loss`}
                       </text>
                     </g>
                   );
@@ -1526,16 +1549,28 @@ export const CoordinationPage = () => {
                   const isReassign = evt.eventType === 'TASK_REASSIGNED' || evt.eventType === 'AUTONOMOUS_WORK_REALLOCATION';
                   const isRole = evt.eventType === 'ROLE_CHANGED' || evt.eventType === 'ROLE_ADAPTED';
                   const isBid = evt.eventType === 'BID_SUBMITTED';
+                  const isPayload = evt.eventType === 'EMERGENCY_PAYLOAD_DELIVERED';
+                  const isRelayDispatch = evt.eventType === 'AUTONOMOUS_MESH_RELAY_DISPATCH';
 
                   return (
                     <div
                       key={idx}
-                      className="p-2.5 rounded-xl border border-slate-800 bg-slate-950/80 text-xs space-y-1 font-mono"
+                      className={`p-2.5 rounded-xl border text-xs space-y-1 font-mono ${
+                        isPayload
+                          ? 'border-amber-500/50 bg-amber-950/30'
+                          : isRelayDispatch
+                          ? 'border-cyan-500/50 bg-cyan-950/30'
+                          : 'border-slate-800 bg-slate-950/80'
+                      }`}
                     >
                       <div className="flex items-center justify-between">
                         <span
                           className={`font-bold ${
-                            isReassign
+                            isPayload
+                              ? 'text-amber-400'
+                              : isRelayDispatch
+                              ? 'text-cyan-300'
+                              : isReassign
                               ? 'text-cyan-400'
                               : isRole
                               ? 'text-purple-400'
@@ -1544,7 +1579,7 @@ export const CoordinationPage = () => {
                               : 'text-slate-300'
                           }`}
                         >
-                          {evt.eventType}
+                          {isPayload ? '📦 EMERGENCY_PAYLOAD_DELIVERED' : isRelayDispatch ? '📶 AUTONOMOUS_MESH_RELAY_DISPATCH' : evt.eventType}
                         </span>
                         <span className="text-[10px] text-slate-500">
                           {evt.timestamp !== undefined ? `${evt.timestamp}s` : 'Live'}
@@ -1552,6 +1587,12 @@ export const CoordinationPage = () => {
                       </div>
 
                       <p className="text-slate-300 font-sans text-[11px] leading-snug">
+                        {isPayload &&
+                          (evt.message ||
+                            `${evt.droneId || 'UAV'} deployed ${evt.payloadType || 'First-Aid Kit'} to casualty ${evt.victimId || 'victim'}`)}
+                        {isRelayDispatch &&
+                          (evt.message ||
+                            `${evt.droneId || 'UAV'} assigned to anchor at Central Stairwell Shaft for multi-floor mesh healing`)}
                         {isRole &&
                           `${evt.droneId} adapted role to '${evt.newRole}'. Reason: ${evt.reason}`}
                         {isReassign &&
@@ -1561,7 +1602,7 @@ export const CoordinationPage = () => {
                             }`)}
                         {isBid &&
                           `Peer ${evt.droneId} submitted bid of ${evt.bidScore}`}
-                        {!isRole && !isReassign && !isBid && (evt.message || JSON.stringify(evt))}
+                        {!isPayload && !isRelayDispatch && !isRole && !isReassign && !isBid && (evt.message || JSON.stringify(evt))}
                       </p>
                     </div>
                   );

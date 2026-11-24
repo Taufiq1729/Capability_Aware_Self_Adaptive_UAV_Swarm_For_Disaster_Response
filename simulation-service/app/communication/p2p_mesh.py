@@ -18,15 +18,25 @@ class P2PCommunicationMesh:
         self.graph = nx.Graph()
         self.message_queues: Dict[str, List[Dict[str, Any]]] = {}
 
-    def update_topology(self, drone_positions: Dict[str, Tuple[float, float]], drone_comm_health: Dict[str, float]) -> nx.Graph:
+    def update_topology(
+        self,
+        drone_positions: Dict[str, Tuple[float, float]],
+        drone_comm_health: Dict[str, float],
+        drone_floors: Optional[Dict[str, int]] = None,
+        stairwell_xy: Tuple[float, float] = (390.0, 310.0),
+        stairwell_radius: float = 85.0
+    ) -> nx.Graph:
         """
-        Reconstructs the communication graph based on Euclidean distance
-        and individual radio health.
+        Reconstructs the communication graph based on Euclidean distance,
+        individual radio health, and 3D architectural floor slab RF attenuation.
+        RF signals attenuate drastically through solid concrete floor slabs (-20 dB),
+        unless either drone is stationed inside the central vertical stairwell shaft/corridor.
         """
         self.graph.clear()
         dids = list(drone_positions.keys())
+        floors = drone_floors or {d: 1 for d in dids}
         for d in dids:
-            self.graph.add_node(d, pos=drone_positions[d])
+            self.graph.add_node(d, pos=drone_positions[d], floor=floors.get(d, 1))
             if d not in self.message_queues:
                 self.message_queues[d] = []
 
@@ -35,15 +45,44 @@ class P2PCommunicationMesh:
             for j in range(i + 1, len(dids)):
                 id_a, id_b = dids[i], dids[j]
                 p_a, p_b = drone_positions[id_a], drone_positions[id_b]
-                dist = math.hypot(p_a[0] - p_b[0], p_a[1] - p_b[1])
+                dist_2d = math.hypot(p_a[0] - p_b[0], p_a[1] - p_b[1])
+                floor_a = floors.get(id_a, 1)
+                floor_b = floors.get(id_b, 1)
+                floor_diff = abs(floor_a - floor_b)
                 
-                # Effective range is reduced if either radio is degraded
-                effective_range = self.comm_range * min(drone_comm_health.get(id_a, 1.0), drone_comm_health.get(id_b, 1.0))
+                # 3D distance including floor vertical elevation (each floor ~ 35m in scale)
+                dist_3d = math.hypot(dist_2d, floor_diff * 35.0)
+
+                # Base effective range modulated by radio health
+                base_range = self.comm_range * min(drone_comm_health.get(id_a, 1.0), drone_comm_health.get(id_b, 1.0))
                 
-                if dist <= effective_range:
-                    dist_factor = dist / max(1.0, effective_range)
-                    loss_prob = self.base_packet_loss + 0.35 * (dist_factor ** 2)
-                    self.graph.add_edge(id_a, id_b, distance=round(dist, 1), loss_prob=round(loss_prob, 3))
+                # Check for 3D Concrete Floor Slab RF Attenuation vs Stairwell Waveguide
+                is_stairwell_bridge = False
+                if floor_diff > 0:
+                    dist_a_stair = math.hypot(p_a[0] - stairwell_xy[0], p_a[1] - stairwell_xy[1])
+                    dist_b_stair = math.hypot(p_b[0] - stairwell_xy[0], p_b[1] - stairwell_xy[1])
+                    # If either drone is inside the vertical stairwell duct, signal propagates vertically
+                    if dist_a_stair <= stairwell_radius or dist_b_stair <= stairwell_radius:
+                        effective_range = base_range * 0.95 # Stairwell vertical line-of-sight duct
+                        is_stairwell_bridge = True
+                    else:
+                        # Solid reinforced concrete slabs heavily attenuate RF (reduces through-slab range to 55m)
+                        effective_range = min(55.0, base_range * (0.22 ** floor_diff))
+                else:
+                    effective_range = base_range
+
+                if dist_3d <= effective_range:
+                    dist_factor = dist_3d / max(1.0, effective_range)
+                    slab_penalty = 0.12 * floor_diff if not is_stairwell_bridge else 0.03
+                    loss_prob = min(0.85, self.base_packet_loss + 0.30 * (dist_factor ** 2) + slab_penalty)
+                    self.graph.add_edge(
+                        id_a,
+                        id_b,
+                        distance=round(dist_3d, 1),
+                        loss_prob=round(loss_prob, 3),
+                        is_stairwell_bridge=is_stairwell_bridge,
+                        floor_diff=floor_diff
+                    )
 
         return self.graph
 
@@ -88,7 +127,9 @@ class P2PCommunicationMesh:
                 "source": u,
                 "target": v,
                 "distance": data.get("distance", 0),
-                "loss_prob": data.get("loss_prob", 0)
+                "loss_prob": data.get("loss_prob", 0),
+                "is_stairwell_bridge": data.get("is_stairwell_bridge", False),
+                "floor_diff": data.get("floor_diff", 0)
             })
 
         connected_components = [list(c) for c in nx.connected_components(self.graph)]
@@ -110,5 +151,7 @@ class P2PCommunicationMesh:
             "num_links": len(edges),
             "betweenness_centrality": betweenness,
             "clustering_coefficient": clustering_coeff,
+            "stairwell_corridor": {"x": 390.0, "y": 310.0, "radius": 85.0},
+            "rf_floor_attenuation_db": 20.0,
             "library": "NetworkX v" + nx.__version__
         }

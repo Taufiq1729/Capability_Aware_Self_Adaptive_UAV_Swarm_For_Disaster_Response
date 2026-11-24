@@ -153,8 +153,9 @@ class DisasterEnvironment:
                 (600, 480, 3, "M302", "Rooftop observer signaling for evacuation", "standing_signaling", 36.5, 72, 0.78)
             ]
 
-        # Convert raw victims to rich human casualty records
+        # Convert raw victims to rich human casualty records with START Triage & Payload states
         for i, (vx, vy, floor, room_id, condition, posture, temp_c, hr_bpm, urgency) in enumerate(raw_victims):
+            triage_tag = "RED" if (urgency >= 0.90 or temp_c > 37.3 or hr_bpm >= 86) else ("YELLOW" if urgency >= 0.80 else "GREEN")
             self.victims.append({
                 "id": f"victim_{i+1}",
                 "name": f"Human Casualty #{i+1:02d}",
@@ -171,7 +172,12 @@ class DisasterEnvironment:
                 "detected": False,
                 "detected_by": None,
                 "detected_at_step": None,
-                "detection_modality": None
+                "detection_modality": None,
+                "triage_tag": triage_tag,
+                "triage_desc": "Immediate Life Support" if triage_tag == "RED" else ("Delayed Extrication" if triage_tag == "YELLOW" else "Minor / Ambulatory"),
+                "payload_status": "PENDING",
+                "payload_delivered_by": None,
+                "payload_type": "FIRST_AID_RF_BEACON"
             })
 
         # Add architectural obstacle colliders corresponding to concrete pillars/walls

@@ -57,7 +57,8 @@ class SwarmManager:
         # Compute initial topology so topology snapshot is immediately populated on startup
         positions = {did: (d.x, d.y) for did, d in self.drones.items()}
         comm_healths = {did: 1.0 for did in self.drones.keys()}
-        self.mesh.update_topology(positions, comm_healths)
+        drone_floors = {did: d.current_floor for did, d in self.drones.items()}
+        self.mesh.update_topology(positions, comm_healths, drone_floors=drone_floors)
 
     def initialize_swarm(self):
         """
@@ -185,7 +186,8 @@ class SwarmManager:
         # Compute initial topology so topology snapshot is immediately populated on startup
         positions = {did: (d.x, d.y) for did, d in self.drones.items()}
         comm_healths = {did: 1.0 for did in self.drones.keys()}
-        self.mesh.update_topology(positions, comm_healths)
+        drone_floors = {did: d.current_floor for did, d in self.drones.items()}
+        self.mesh.update_topology(positions, comm_healths, drone_floors=drone_floors)
         self.recent_events.clear()
 
     def inject_fault(self, drone_id: str, component: str, fault_type: str, severity: float = 0.8, gradual: bool = False) -> Dict[str, Any]:
@@ -229,6 +231,7 @@ class SwarmManager:
         drone_states = []
         positions = {}
         comm_healths = {}
+        drone_floors = {}
 
         for did, drone in self.drones.items():
             # Local smoke density at drone location
@@ -244,12 +247,13 @@ class SwarmManager:
             
             positions[did] = (drone.x, drone.y)
             comm_healths[did] = drone.latest_capabilities.get("c_Communication", 1.0)
+            drone_floors[did] = drone.current_floor
 
             # Sensor coverage marking on environment grid
             drone_fov = 70.0 * drone.latest_capabilities.get("c_LiDAR", 1.0)
             self.env.mark_coverage(drone.x, drone.y, fov_radius=max(35.0, drone_fov))
 
-            # Check for victim detection in FOV
+            # Check for victim detection in FOV & Automated START Triage
             for victim in self.env.victims:
                 if not victim["detected"]:
                     dist = math.hypot(drone.x - victim["x"], drone.y - victim["y"])
@@ -262,14 +266,36 @@ class SwarmManager:
                         victim["detected_by"] = did
                         victim["detected_at_step"] = self.step_count
                         victim["detection_modality"] = "THERMAL_FLIR" if thm_cap > rgb_cap else "RGB_VISION"
+                        victim["triage_step"] = self.step_count
+                        
+                        t_tag = victim.get("triage_tag", "RED")
                         self.recent_events.append({
                             "eventType": "VICTIM_LOCATED",
                             "victimId": victim["id"],
                             "droneId": did,
+                            "triageTag": t_tag,
+                            "vitalSummary": f"Temp {victim.get('vital_temp_c', 37.0)}°C, Pulse {victim.get('pulse_bpm', 80)} BPM",
                             "location": {"x": victim["x"], "y": victim["y"], "floor": victim["floor"]},
                             "modality": victim["detection_modality"],
                             "timestamp": round(self.sim_time, 1)
                         })
+
+                        # Automated Emergency First-Aid / Radio Beacon Drop for Immediate (RED/YELLOW) Survivors
+                        if t_tag in ["RED", "YELLOW"] and victim.get("payload_status") != "DELIVERED":
+                            mob_cap = drone.latest_capabilities.get("c_Mobility", 1.0)
+                            if mob_cap >= 0.35:
+                                victim["payload_status"] = "DELIVERED"
+                                victim["payload_delivered_by"] = did
+                                victim["payload_delivered_at_step"] = self.step_count
+                                self.recent_events.append({
+                                    "eventType": "EMERGENCY_PAYLOAD_DELIVERED",
+                                    "victimId": victim["id"],
+                                    "droneId": did,
+                                    "triageTag": t_tag,
+                                    "location": {"x": victim["x"], "y": victim["y"], "floor": victim["floor"]},
+                                    "message": f"UAV {did} deployed emergency medical beacon kit to {t_tag} survivor ({victim['name']}).",
+                                    "timestamp": round(self.sim_time, 1)
+                                })
 
             # 2. Check for Role Adaptation & Task Reassignment Need
             if state["role_changed"]:
@@ -284,6 +310,18 @@ class SwarmManager:
                     "timestamp": round(self.sim_time, 1)
                 }
                 self.recent_events.append(event)
+
+                # Autonomous Stairwell Mesh Self-Healing:
+                # If role adapted to Communication Relay, dispatch drone to the central vertical architectural stairwell
+                if "relay" in new_role.lower():
+                    drone.set_target(390.0, 310.0, tz=18.0)
+                    self.recent_events.append({
+                        "eventType": "AUTONOMOUS_MESH_RELAY_DISPATCH",
+                        "droneId": did,
+                        "target": "Central Stairwell Vertical RF Anchor (390, 310)",
+                        "reason": "Relocating to stairwell line-of-sight duct to heal 3D floor network partition.",
+                        "timestamp": round(self.sim_time, 1)
+                    })
 
                 # Check if this drone held tasks requiring capabilities it no longer possesses
                 for task in self.tasks:
@@ -308,8 +346,8 @@ class SwarmManager:
                             "timestamp": round(self.sim_time, 1)
                         })
 
-        # 3. Update P2P Communication Mesh Topology using NetworkX (Stage 6)
-        comm_graph = self.mesh.update_topology(positions, comm_healths)
+        # 3. Update P2P Communication Mesh Topology using NetworkX (Stage 6) with 3D Floor Attenuation
+        comm_graph = self.mesh.update_topology(positions, comm_healths, drone_floors=drone_floors)
         topology_snapshot = self.mesh.get_topology_snapshot()
 
         # 4. Process Decentralized Task Auctions with Connected Peers (Stage 7)
